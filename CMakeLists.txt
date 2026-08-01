@@ -65,6 +65,7 @@ if(DAEDALUS_BUILD_APP)
         src/graphics/D3D12Context.h
         src/graphics/TriangleRenderer.cpp
         src/graphics/TriangleRenderer.h
+        src/platform/UniqueWin32Handle.h
         src/platform/Win32Window.cpp
         src/platform/Win32Window.h)
 

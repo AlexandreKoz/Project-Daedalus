@@ -146,9 +146,101 @@ Final archive statistics are authoritative in the separate `DELIVERY_MANIFEST.md
 
 ## Known technical debt
 
-- The Windows application has received detailed source review but no MSVC compile evidence yet.
+- A pre-closure Windows Debug snapshot compiled and ran successfully; the closure-modified Windows files still require Debug and Release revalidation.
 - The upload-heap vertex buffer is intentionally simple and should be replaced by an explicit staging/default-heap path when real assets arrive.
 - Device removal is reported, but Campaign A does not attempt device recovery.
 - No frame pacing exists beyond vertical synchronization and minimized-window sleep.
 - CI assumes an installed Windows SDK exposes DXC through one of the documented discovery paths; the first hosted run must confirm the runner image.
+- Version 0.0.1 is repeated in CMake, `VERSION`, and the source version header; a later maintenance patch should generate the source constant from one authoritative value.
 - The adapter policy favors dedicated memory after DXGI preference ordering; future hybrid-laptop testing may motivate a user-selectable adapter identifier.
+
+## 2026-08-01 developer Windows baseline
+
+The developer supplied a complete local Debug transcript from a Windows 11 system after the initial archive was placed in a Git repository. The observed environment and results were:
+
+- Visual Studio 2026 Developer PowerShell 18.8.2.
+- MSVC 19.51.36252 with v145 and x64 host/target tools.
+- Windows SDK 10.0.26100.0.
+- DXC 1.8.2502.11.
+- Successful `Visual Studio 18 2026` CMake generation.
+- Successful build of the application, CPU test executable, and both DXIL shaders.
+- CTest one of one passed and five direct test cases passed.
+- RTX 4060 Ti selected with 7949 MiB dedicated video memory.
+- D3D12 feature level 12.1 and debug layer enabled.
+- Two-buffer flip-discard swap chain with vertical synchronization.
+- A 120-frame hardware run exited with code zero.
+- An interactive run presented 1468 frames, logged minimize/restore and a resize to 1920 by 1017, then exited cleanly.
+- Explicit WARP selection reported Microsoft Basic Render Driver.
+- The captured hardware log contained no match for the requested error, corruption, device-removal, reset, or failure patterns.
+
+The transcript did not include Release results, a complete WARP exit, a 30-second run, very-small-window stress, multi-display movement, repeated Alt+Tab, or a hosted CI run.
+
+## 2026-08-01 closure audit defects
+
+A follow-up source audit identified three concrete defects:
+
+1. `Application::shutdown` destroyed `TriangleRenderer` before the no-throw context flush on exceptional paths. Previously submitted work could still reference the renderer's PSO, root signature, or vertex buffer.
+2. The D3D12 fence event was a raw `HANDLE`. If context construction threw after event creation, the class destructor would not run and the handle could leak. Window-class registration had a similar constructor-failure cleanup gap.
+3. `package-source.ps1` classified `.git` as a prohibited directory during preflight, so it rejected an ordinary Git checkout even though the later copy stage already excluded `.git`.
+
+The audit also noted stale documentation and the absence of first-class Visual Studio 2026 presets despite the developer's actual environment.
+
+## 2026-08-01 closure implementation
+
+The closure patch made these changes:
+
+- Added `UniqueWin32Handle`, a narrow move-only RAII owner used for the D3D12 fence event.
+- Added `gpu_idle_proven_` tracking and a no-throw `try_wait_for_gpu` path with explicit logging for signal, event-registration, and wait failures.
+- Added `prepare_for_shutdown`, called before renderer destruction on every application cleanup path.
+- Added a fatal-path abandonment policy: when GPU idleness cannot be proven, ownership is detached and left for operating-system process cleanup instead of releasing objects potentially referenced by queued work.
+- Preserved the throwing `wait_for_gpu` path for normal successful shutdown and resize validation.
+- Made Win32 window construction clean up owned class registration and any partially created window on failure.
+- Unregisters a window class only when the object actually registered it and clears `GWLP_USERDATA` on `WM_NCDESTROY`.
+- Modified source packaging to ignore Git metadata during preflight while continuing to exclude it from the archive.
+- Added Visual Studio 2026 Debug and Release presets using `Visual Studio 18 2026` and `v145,host=x64`.
+- Added `-VisualStudioVersion 2022|2026` selection to configure, build, test, and run helpers while keeping VS2022 as the default and CI baseline.
+- Reconciled README, architecture, acceptance, and this experiment log with the developer evidence and the exact-snapshot validation boundary.
+
+## Closure validation performed
+
+The closure environment remained Linux and could not execute PowerShell, MSVC, DXC, Win32, or D3D12. Validation on the repaired snapshot therefore included:
+
+```text
+cmake -S . -B build-linux-gcc -G Ninja \
+  -DDAEDALUS_BUILD_APP=OFF \
+  -DDAEDALUS_BUILD_TESTS=ON \
+  -DDAEDALUS_WARNINGS_AS_ERRORS=ON \
+  -DBUILD_TESTING=ON
+cmake --build build-linux-gcc --parallel 2
+ctest --test-dir build-linux-gcc --output-on-failure
+
+cmake -S . -B build-linux-clang -G Ninja \
+  -DCMAKE_CXX_COMPILER=clang++ \
+  -DDAEDALUS_BUILD_APP=OFF \
+  -DDAEDALUS_BUILD_TESTS=ON \
+  -DDAEDALUS_WARNINGS_AS_ERRORS=ON \
+  -DBUILD_TESTING=ON
+cmake --build build-linux-clang --parallel 2
+ctest --test-dir build-linux-clang --output-on-failure
+
+cmake --list-presets=all
+```
+
+The final command results, source counts, marker scan, archive inspection, and SHA-256 are recorded in the external delivery manifest generated after packaging.
+
+## Closure validation limitations
+
+- The modified Win32 and D3D12 translation units were not compiled under MSVC in the closure environment.
+- PowerShell helper syntax received source review but could not be executed in the closure environment.
+- Exceptional shutdown behavior was repaired by ownership and ordering analysis but still needs a Windows regression run.
+- The VS2026 presets need local Debug and Release execution on the developer machine.
+- GitHub Actions remains unexecuted.
+
+## Closure source statistics before packaging
+
+- Repository file count: 43.
+- C and C++ source/header count: 20.
+- HLSL source count: 1.
+- Registered CTest tests: 1.
+- Assertion-based test cases: 5.
+- Approximate repository text lines: 3759.

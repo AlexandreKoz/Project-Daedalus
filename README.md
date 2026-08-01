@@ -1,6 +1,6 @@
 # Project Daedalus
 
-Project Daedalus is an AI-assisted Windows rendering laboratory. Version 0.0.1 contains Campaign A: a deliberately small Win32 and Direct3D 12 foundation that is intended to be audited before later rendering systems are added.
+Project Daedalus is an AI-assisted Windows rendering laboratory. Version 0.0.1 contains Campaign A: a deliberately small Win32 and Direct3D 12 foundation intended to be audited before later rendering systems are added.
 
 ## Campaign A status
 
@@ -13,20 +13,22 @@ The source implements:
 - DXC build-time compilation of Shader Model 6.0 vertex and pixel shaders.
 - A minimal root signature and graphics pipeline that render an interpolated-colour triangle.
 - Explicit `PRESENT` to `RENDER_TARGET` and `RENDER_TARGET` to `PRESENT` transitions.
-- Safe minimize, restore, resize, and shutdown paths.
+- Minimize, restore, resize, frame-limited execution, and clean shutdown paths.
 - Session logging, HRESULT diagnostics, CPU tests, CTest registration, and Windows CI configuration.
 
-The repository was produced in a Linux environment. The portable core and CPU tests were compiled and run there, but the Win32 application, DXC shader build, D3D12 debug layer, and graphical output require local Windows validation. The exact evidence is recorded in `docs/campaigns/campaign-a-acceptance.md`.
+A pre-closure Campaign A snapshot was compiled and run locally on Windows 11 on 2026-08-01 with Visual Studio 2026, MSVC 19.51/v145, Windows SDK 10.0.26100.0, DXC 1.8.2502.11, and an NVIDIA GeForce RTX 4060 Ti. That run passed Debug configuration and compilation, both shader builds, five CPU test cases, a 120-frame hardware smoke test, an interactive resize/minimize/restore run, and explicit WARP initialization.
+
+The current closure patch repairs exceptional shutdown ordering, constructor-time Win32 resource ownership, source packaging from a normal Git checkout, and Visual Studio 2026 preset support. Because those source files changed after the recorded Windows run, the exact current snapshot still requires the documented Windows Debug and Release revalidation. The authoritative status is in `docs/campaigns/campaign-a-acceptance.md`.
 
 ## Prerequisites
 
 Use a 64-bit Windows 11 or compatible Windows 10/11 development system with:
 
-1. Visual Studio 2022 or Visual Studio 2022 Build Tools.
+1. Visual Studio 2022/Build Tools with MSVC v143, or Visual Studio 2026 with MSVC v145.
 2. The **Desktop development with C++** workload.
-3. MSVC v143 x64 build tools.
-4. A recent Windows 10 or Windows 11 SDK.
-5. CMake 3.25 or newer.
+3. A recent Windows 10 or Windows 11 SDK.
+4. CMake 3.25 or newer for the Visual Studio 2022 presets.
+5. A CMake build that lists the `Visual Studio 18 2026` generator for the Visual Studio 2026 presets.
 6. DirectX Shader Compiler (`dxc.exe`) from the Windows SDK or an official DXC installation.
 7. A Direct3D 12-capable adapter for hardware execution. Microsoft WARP can be selected explicitly for diagnostics.
 
@@ -47,10 +49,12 @@ Configuration fails clearly when DXC cannot be found. There is no FXC fallback.
 Example override:
 
 ```powershell
-cmake --preset windows-msvc-debug -DDXC_PATH="C:\path\to\dxc.exe"
+cmake --preset windows-vs2026-debug -DDXC_PATH="C:\path\to\dxc.exe"
 ```
 
 ## Configure, build, and test
+
+### Visual Studio 2022
 
 From a Visual Studio 2022 Developer PowerShell:
 
@@ -58,11 +62,7 @@ From a Visual Studio 2022 Developer PowerShell:
 cmake --preset windows-msvc-debug
 cmake --build --preset windows-msvc-debug
 ctest --preset windows-msvc-debug
-```
 
-Release:
-
-```powershell
 cmake --preset windows-msvc-release
 cmake --build --preset windows-msvc-release
 ctest --preset windows-msvc-release
@@ -71,48 +71,67 @@ ctest --preset windows-msvc-release
 Equivalent helpers:
 
 ```powershell
-.\scripts\configure.ps1 -Configuration Debug
-.\scripts\build.ps1 -Configuration Debug
-.\scripts\test.ps1 -Configuration Debug
+.\scripts\configure.ps1 -Configuration Debug -VisualStudioVersion 2022
+.\scripts\build.ps1 -Configuration Debug -VisualStudioVersion 2022
+.\scripts\test.ps1 -Configuration Debug -VisualStudioVersion 2022
 ```
 
-The presets use Visual Studio 2022, x64, out-of-source build directories, C++20, `/W4`, `/permissive-`, `/Zc:__cplusplus`, `/utf-8`, and warnings-as-errors for project-owned C++.
+### Visual Studio 2026
+
+From a Visual Studio 2026 Developer PowerShell:
+
+```powershell
+cmake --preset windows-vs2026-debug
+cmake --build --preset windows-vs2026-debug
+ctest --preset windows-vs2026-debug
+
+cmake --preset windows-vs2026-release
+cmake --build --preset windows-vs2026-release
+ctest --preset windows-vs2026-release
+```
+
+Equivalent helpers:
+
+```powershell
+.\scripts\configure.ps1 -Configuration Debug -VisualStudioVersion 2026
+.\scripts\build.ps1 -Configuration Debug -VisualStudioVersion 2026
+.\scripts\test.ps1 -Configuration Debug -VisualStudioVersion 2026
+```
+
+All Windows presets target x64, use out-of-source build directories, enable C++20, apply `/W4`, `/permissive-`, `/Zc:__cplusplus`, and `/utf-8`, and treat project-owned warnings as errors. The Visual Studio 2026 presets explicitly select `v145,host=x64`.
 
 ## Run
 
-Normal hardware adapter:
+Visual Studio 2022 Debug output:
 
 ```powershell
 .\build\windows-msvc-debug\Debug\Daedalus.exe
 ```
 
-Explicit WARP:
+Visual Studio 2026 Debug output:
 
 ```powershell
-.\build\windows-msvc-debug\Debug\Daedalus.exe --warp
+.\build\windows-vs2026-debug\Debug\Daedalus.exe
 ```
 
-Repeatable 120-frame smoke run:
+Helper examples:
 
 ```powershell
-.\build\windows-msvc-debug\Debug\Daedalus.exe --frames 120
+.\scripts\run.ps1 -Configuration Debug -VisualStudioVersion 2026
+.\scripts\run.ps1 -Configuration Debug -VisualStudioVersion 2026 -Warp
+.\scripts\run.ps1 -Configuration Debug -VisualStudioVersion 2026 -Frames 120
 ```
 
-Helper equivalents:
+The application supports:
 
-```powershell
-.\scripts\run.ps1 -Configuration Debug
-.\scripts\run.ps1 -Configuration Debug -Warp
-.\scripts\run.ps1 -Configuration Debug -Frames 120
+```text
+Daedalus.exe
+Daedalus.exe --warp
+Daedalus.exe --frames 120
+Daedalus.exe --help
 ```
 
-Help does not initialize Direct3D 12:
-
-```powershell
-.\build\windows-msvc-debug\Debug\Daedalus.exe --help
-```
-
-Invalid arguments return a nonzero exit code and print usage information.
+`--help` exits without initializing Direct3D 12. Invalid arguments return a nonzero exit code and print usage information.
 
 ## Expected result
 
@@ -126,7 +145,7 @@ Startup logging includes the application version, build type, process architectu
 
 ## Required local graphical validation
 
-Perform this checklist on the target Windows system:
+Perform this checklist on the exact source snapshot being accepted:
 
 1. Launch the Debug hardware build and confirm the expected adapter in the log.
 2. Confirm the coloured triangle is visible and stable for at least 30 seconds.
@@ -135,8 +154,8 @@ Perform this checklist on the target Windows system:
 5. Move between displays when more than one is available.
 6. Use Alt+Tab repeatedly.
 7. Close with the window close button and confirm a clean exit.
-8. Run `Daedalus.exe --frames 120` and confirm automatic clean exit.
-9. Run `Daedalus.exe --warp` and confirm WARP is reported.
+8. Run `Daedalus.exe --frames 120` and confirm automatic clean exit and exit code zero.
+9. Run `Daedalus.exe --warp --frames 120` and confirm WARP plus clean exit.
 10. Inspect the debugger and session log for D3D12 corruption, errors, and warnings.
 11. Repeat the relevant checks in Release.
 
@@ -157,6 +176,14 @@ Install **Settings → System → Optional features → View features → Graphi
 **DXC cannot be found**
 
 Confirm that a recent Windows SDK is installed. Run `where.exe dxc`, or pass `-DDXC_PATH=<path>` to configuration.
+
+**The Visual Studio 2022 preset reports MSB8020**
+
+Install the MSVC v143 x64/x86 build tools, or use the Visual Studio 2026 presets on a machine with v145:
+
+```powershell
+.\scripts\configure.ps1 -Configuration Debug -VisualStudioVersion 2026 -DxcPath $Dxc
+```
 
 **Hardware initialization fails**
 
@@ -179,7 +206,7 @@ docs/                Architecture, acceptance evidence, research, and agent log
 scripts/             Configure, build, test, run, clean, and source-package helpers
 shaders/             HLSL source
 src/core/            Command-line, diagnostics, logging, and version utilities
-src/platform/        Win32 window ownership and message dispatch
+src/platform/        Win32 window and operating-system handle ownership
 src/graphics/        Adapter policy, D3D12 frame infrastructure, and triangle renderer
 tests/               Dependency-free CPU test executable
 ```
@@ -199,18 +226,18 @@ Campaign A excludes ray tracing, acceleration structures, path tracing, denoisin
 
 ## CI boundary
 
-`.github/workflows/windows-build.yml` configures, builds, and runs CPU tests for Debug and Release on a Windows Server 2022 GitHub-hosted runner. It validates compilation and shader compilation when the runner's SDK supplies DXC. It does not validate visible rendering, display transitions, WARP execution, or debug-layer cleanliness.
+`.github/workflows/windows-build.yml` configures, builds, and runs CPU tests for Debug and Release on a Windows Server 2022 GitHub-hosted runner using the Visual Studio 2022 presets. It validates compilation and shader compilation when the runner's SDK supplies DXC. It does not validate visible rendering, display transitions, WARP execution, or debug-layer cleanliness.
 
 ## Source packaging
 
-After removing generated directories:
+The packaging helper is designed to run from a normal Git checkout. It ignores `.git` metadata while scanning and copying, but rejects generated build products and restricted binaries elsewhere in the working tree.
 
 ```powershell
 .\scripts\clean.ps1
 .\scripts\package-source.ps1
 ```
 
-The packaging helper rejects generated build products and restricted binary types before creating `Project-Daedalus-Campaign-A.zip`, then inspects the resulting entry list and prints its SHA-256 hash.
+It creates `Project-Daedalus-Campaign-A.zip`, inspects the resulting entry list, and prints the SHA-256 hash.
 
 ## License status
 
@@ -218,4 +245,4 @@ A project license has not yet been selected. No license grant should be inferred
 
 ## Next planned campaign
 
-Campaign B is expected to introduce the first asset-backed raster rendering path. Its exact acceptance scope should be approved only after Campaign A receives a successful Windows runtime audit.
+Campaign B is expected to introduce the first asset-backed raster rendering path. Its exact acceptance scope should be approved only after the current closure patch passes Windows Debug, Release, WARP, and CI revalidation.

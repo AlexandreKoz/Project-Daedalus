@@ -9,6 +9,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace daedalus
@@ -90,6 +91,7 @@ void D3D12Context::end_frame()
     DAEDALUS_THROW_IF_FAILED(command_list_->Close());
     ID3D12CommandList* command_lists[] = {command_list_.Get()};
     command_queue_->ExecuteCommandLists(1, command_lists);
+    gpu_idle_proven_ = false;
 
     const HRESULT present_result = swap_chain_->Present(1, 0);
     if (FAILED(present_result))
@@ -143,7 +145,7 @@ void D3D12Context::resize(std::uint32_t width, std::uint32_t height)
 
 void D3D12Context::wait_for_gpu()
 {
-    if (command_queue_ == nullptr || fence_ == nullptr || fence_event_ == nullptr)
+    if (gpu_idle_proven_ || command_queue_ == nullptr || fence_ == nullptr || !fence_event_)
     {
         return;
     }
@@ -155,6 +157,18 @@ void D3D12Context::wait_for_gpu()
     {
         frame.fence_value = 0;
     }
+    gpu_idle_proven_ = true;
+}
+
+bool D3D12Context::prepare_for_shutdown() noexcept
+{
+    if (try_wait_for_gpu())
+    {
+        return true;
+    }
+
+    Log::warning("GPU idle could not be proven before renderer teardown.");
+    return false;
 }
 
 void D3D12Context::shutdown() noexcept
@@ -165,33 +179,13 @@ void D3D12Context::shutdown() noexcept
     }
     shutdown_complete_ = true;
 
-    if (command_queue_ != nullptr && fence_ != nullptr && fence_event_ != nullptr)
+    if (!try_wait_for_gpu())
     {
-        const std::uint64_t signal_value = next_fence_value_++;
-        const HRESULT signal_result = command_queue_->Signal(fence_.Get(), signal_value);
-        if (SUCCEEDED(signal_result) && fence_->GetCompletedValue() < signal_value)
-        {
-            const HRESULT event_result = fence_->SetEventOnCompletion(signal_value, fence_event_);
-            if (SUCCEEDED(event_result))
-            {
-                WaitForSingleObject(fence_event_, INFINITE);
-            }
-            else
-            {
-                Log::error(format_failure_message(
-                    static_cast<ResultCode>(event_result), "ID3D12Fence::SetEventOnCompletion during shutdown"));
-            }
-        }
-        else if (FAILED(signal_result))
-        {
-            Log::error(format_failure_message(static_cast<ResultCode>(signal_result), "ID3D12CommandQueue::Signal during shutdown"));
-        }
-    }
-
-    if (fence_event_ != nullptr)
-    {
-        CloseHandle(fence_event_);
-        fence_event_ = nullptr;
+        Log::error(
+            "GPU idle could not be proven during final shutdown. D3D12 resources are intentionally being retained "
+            "until process exit.");
+        abandon_resources();
+        return;
     }
 
     command_list_.Reset();
@@ -205,6 +199,7 @@ void D3D12Context::shutdown() noexcept
     swap_chain_.Reset();
     command_queue_.Reset();
     fence_.Reset();
+    fence_event_.reset();
     device_.Reset();
     adapter_.Reset();
     factory_.Reset();
@@ -448,11 +443,12 @@ void D3D12Context::create_command_objects()
     DAEDALUS_THROW_IF_FAILED(command_list_->Close());
 
     DAEDALUS_THROW_IF_FAILED(device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_)));
-    fence_event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (fence_event_ == nullptr)
+    UniqueWin32Handle event(CreateEventW(nullptr, FALSE, FALSE, nullptr));
+    if (!event)
     {
         throw ResultError(static_cast<ResultCode>(HRESULT_FROM_WIN32(GetLastError())), "CreateEventW for D3D12 fence");
     }
+    fence_event_ = std::move(event);
 }
 
 void D3D12Context::create_swap_chain()
@@ -503,12 +499,93 @@ void D3D12Context::wait_for_fence(std::uint64_t value)
         return;
     }
 
-    DAEDALUS_THROW_IF_FAILED(fence_->SetEventOnCompletion(value, fence_event_));
-    const DWORD wait_result = WaitForSingleObject(fence_event_, INFINITE);
+    DAEDALUS_THROW_IF_FAILED(fence_->SetEventOnCompletion(value, fence_event_.get()));
+    const DWORD wait_result = WaitForSingleObject(fence_event_.get(), INFINITE);
+    if (wait_result == WAIT_FAILED)
+    {
+        throw ResultError(
+            static_cast<ResultCode>(HRESULT_FROM_WIN32(GetLastError())), "WaitForSingleObject for D3D12 fence");
+    }
     if (wait_result != WAIT_OBJECT_0)
     {
-        throw ResultError(static_cast<ResultCode>(HRESULT_FROM_WIN32(GetLastError())), "WaitForSingleObject for D3D12 fence");
+        std::ostringstream stream;
+        stream << "WaitForSingleObject returned unexpected status " << wait_result << " for the D3D12 fence";
+        throw std::runtime_error(stream.str());
     }
+}
+
+bool D3D12Context::try_wait_for_gpu() noexcept
+{
+    if (gpu_idle_proven_ || command_queue_ == nullptr || fence_ == nullptr || !fence_event_)
+    {
+        return true;
+    }
+
+    const std::uint64_t signal_value = next_fence_value_++;
+    const HRESULT signal_result = command_queue_->Signal(fence_.Get(), signal_value);
+    if (FAILED(signal_result))
+    {
+        Log::error(format_failure_message(
+            static_cast<ResultCode>(signal_result), "ID3D12CommandQueue::Signal during shutdown"));
+        return false;
+    }
+
+    if (fence_->GetCompletedValue() < signal_value)
+    {
+        const HRESULT event_result = fence_->SetEventOnCompletion(signal_value, fence_event_.get());
+        if (FAILED(event_result))
+        {
+            Log::error(format_failure_message(
+                static_cast<ResultCode>(event_result), "ID3D12Fence::SetEventOnCompletion during shutdown"));
+            return false;
+        }
+
+        const DWORD wait_result = WaitForSingleObject(fence_event_.get(), INFINITE);
+        if (wait_result != WAIT_OBJECT_0)
+        {
+            if (wait_result == WAIT_FAILED)
+            {
+                Log::error(format_failure_message(
+                    static_cast<ResultCode>(HRESULT_FROM_WIN32(GetLastError())),
+                    "WaitForSingleObject for D3D12 fence during shutdown"));
+            }
+            else
+            {
+                std::ostringstream stream;
+                stream << "WaitForSingleObject returned unexpected status " << wait_result
+                       << " while waiting for the D3D12 fence during shutdown";
+                Log::error(stream.str());
+            }
+            return false;
+        }
+    }
+
+    for (FrameResource& frame : frames_)
+    {
+        frame.fence_value = 0;
+    }
+    gpu_idle_proven_ = true;
+    return true;
+}
+
+void D3D12Context::abandon_resources() noexcept
+{
+    // Member destructors must not release these objects after an unsuccessful final queue flush.
+    static_cast<void>(command_list_.Detach());
+    for (FrameResource& frame : frames_)
+    {
+        static_cast<void>(frame.back_buffer.Detach());
+        static_cast<void>(frame.command_allocator.Detach());
+        frame.fence_value = 0;
+    }
+    static_cast<void>(rtv_heap_.Detach());
+    static_cast<void>(swap_chain_.Detach());
+    static_cast<void>(command_queue_.Detach());
+    static_cast<void>(fence_.Detach());
+    static_cast<void>(fence_event_.release());
+    static_cast<void>(device_.Detach());
+    static_cast<void>(adapter_.Detach());
+    static_cast<void>(factory_.Detach());
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE D3D12Context::rtv_handle(std::uint32_t index) const noexcept

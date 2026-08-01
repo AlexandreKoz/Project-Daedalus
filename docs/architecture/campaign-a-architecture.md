@@ -27,7 +27,7 @@ wmain
                     owns root signature, PSO, and vertex buffer
 ```
 
-`Application` destroys `TriangleRenderer` before flushing and destroying `D3D12Context`; it destroys the window after graphics shutdown. COM objects use `Microsoft::WRL::ComPtr`. The fence event is the only raw operating-system handle in the graphics context and is closed explicitly.
+`Application` asks `D3D12Context` to prove the graphics queue idle before destroying `TriangleRenderer`, then destroys the graphics context and finally the window. COM objects use `Microsoft::WRL::ComPtr`. The fence event uses the narrow `UniqueWin32Handle` RAII wrapper, so it is released even when `D3D12Context` construction fails after event creation.
 
 ## Application lifecycle
 
@@ -37,7 +37,8 @@ wmain
 4. The window is shown only after graphics initialization succeeds.
 5. The main loop drains all pending messages, consumes a coalesced nonzero resize, skips rendering while minimized, records one frame, presents, and checks the optional frame limit.
 6. Normal exit waits for queued GPU work.
-7. The application boundary logs fatal exceptions, writes to standard error and the debugger, displays a message box, and returns a failure code.
+7. All cleanup paths call `prepare_for_shutdown` before renderer destruction. This performs a no-throw fence flush and records whether GPU idleness was proven.
+8. The application boundary logs fatal exceptions, writes to standard error and the debugger, displays a message box, and returns a failure code.
 
 ## Frame lifecycle
 
@@ -76,7 +77,7 @@ Each `FrameResource` owns exactly one direct command allocator and one swap-chai
 
 `next_fence_value_` is monotonic. After each execute/present sequence, the queue signals one new value and stores it on the frame just submitted. `wait_for_fence` uses `SetEventOnCompletion` and an auto-reset event. Full flushes used by resize and shutdown signal a fresh value and wait for it, proving all earlier queue work is complete.
 
-Shutdown is no-throw. If signaling or event registration fails during destruction, the failure is logged and resources are still released in a deterministic order.
+Normal `wait_for_gpu` is throwing so a requested clean exit cannot silently claim success after a synchronization failure. Cleanup uses `try_wait_for_gpu`, a no-throw path that logs signal, event-registration, and wait failures. `gpu_idle_proven_` avoids redundant flushes after a successful wait. The application performs this check while renderer resources still exist; only a successful result permits normal renderer and context destruction. If GPU idleness cannot be proven during fatal process shutdown, Daedalus intentionally detaches the renderer, graphics context, window, COM objects, and fence handle so operating-system process cleanup reclaims them instead of risking release of objects still referenced by queued work.
 
 ## Swap-chain ownership
 
@@ -93,7 +94,7 @@ The current index always comes from `GetCurrentBackBufferIndex`; it is not advan
 
 ## Resize sequence
 
-The window class records the latest nonzero client dimensions and exposes them as one pending resize. A minimized or zero-area window never requests swap-chain work.
+The window class records the latest nonzero client dimensions and exposes them as one pending resize. A minimized or zero-area window never requests swap-chain work. Class registration ownership is tracked separately from class availability: an object unregisters only a class registration it created. Constructor failures destroy any partially created window and unregister owned class state, while `WM_NCDESTROY` clears the stored instance pointer.
 
 The graphics resize sequence is:
 

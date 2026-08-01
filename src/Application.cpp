@@ -166,16 +166,35 @@ void Application::initialize()
 
 void Application::shutdown() noexcept
 {
-    renderer_.reset();
-    if (graphics_ != nullptr)
+    const bool gpu_idle = graphics_ == nullptr || graphics_->prepare_for_shutdown();
+    bool resources_abandoned = false;
+
+    if (gpu_idle)
     {
-        graphics_->shutdown();
-        graphics_.reset();
+        renderer_.reset();
+        if (graphics_ != nullptr)
+        {
+            graphics_->shutdown();
+            graphics_.reset();
+        }
+        window_.reset();
     }
-    window_.reset();
+    else
+    {
+        // The process is terminating. Leaking is safer than releasing objects that may still be referenced by the GPU.
+        Log::error(
+            "GPU idle could not be proven. Daedalus is intentionally retaining graphics and window resources until "
+            "process exit rather than releasing objects that queued GPU work may still reference.");
+        static_cast<void>(renderer_.release());
+        static_cast<void>(graphics_.release());
+        static_cast<void>(window_.release());
+        resources_abandoned = true;
+    }
+
     if (initialized_)
     {
-        Log::info("Project Daedalus shutdown complete");
+        Log::info(resources_abandoned ? "Project Daedalus shutdown deferred to process cleanup"
+                                      : "Project Daedalus shutdown complete");
     }
     initialized_ = false;
     Log::shutdown();

@@ -1,54 +1,77 @@
 # Campaign A acceptance matrix
 
-## Validation environment
+## Evidence boundary
 
-Repository generation and available validation were performed in a Linux x86-64 container on 2026-07-30. The container provided CMake 3.31.6, GNU C++ 14.2.0, Clang 17.0.0, Ninja, Python 3.13.5, and ZIP tooling. It did not provide Windows, Visual Studio, the Windows SDK, DXC, PowerShell, a desktop session, DXGI, a D3D12 device, or Graphics Tools.
+Two evidence sets are distinguished deliberately:
 
-A deliberate default configuration attempt on Linux failed with the repository's platform guard and explained how to run CPU-only validation. Two CPU-only configurations then compiled with warnings-as-errors and passed CTest.
+1. **Developer Windows baseline, 2026-08-01.** The pre-closure snapshot configured and built in Visual Studio 2026 Developer PowerShell with MSVC 19.51/v145, Windows SDK 10.0.26100.0, and DXC 1.8.2502.11. CTest passed, the RTX 4060 Ti hardware path presented frames, resize/minimize/restore succeeded, and explicit WARP initialization succeeded.
+2. **Closure-patch validation.** The current snapshot repairs shutdown ordering, constructor-time Win32 resource ownership, packaging from a Git checkout, and Visual Studio 2026 presets. The closure environment is Linux x86-64 and cannot compile or execute the modified Win32/D3D12 translation units. Portable CPU tests, preset parsing, source review, hygiene checks, and archive inspection are run on this exact snapshot.
 
-## Acceptance criteria
+The baseline runtime evidence remains useful, but it is not presented as execution evidence for source files changed by the closure patch.
 
-| Requirement | Status | Evidence | Validation command | Actually run | Remaining limitation |
+## Developer Windows baseline evidence
+
+The supplied Windows transcript recorded:
+
+- Visual Studio 2026 18.8.2 and MSVC 19.51.36252 with the v145 x64 toolset.
+- Windows SDK 10.0.26100.0 and 64-bit DXC 1.8.2502.11.
+- Successful CMake generation with `Visual Studio 18 2026`, `-A x64`, and `-T v145,host=x64`.
+- Successful compilation of `Daedalus.exe`, `DaedalusCoreTests.exe`, `TriangleVS.dxil`, and `TrianglePS.dxil`.
+- CTest: one registered test, one passed, zero failed.
+- Direct test execution: five test cases passed.
+- Hardware selection: NVIDIA GeForce RTX 4060 Ti, 7949 MiB dedicated memory.
+- D3D12 feature level 12.1, debug layer enabled, two flip-discard buffers, vertical synchronization enabled.
+- A 120-frame hardware run with exit code zero and clean shutdown.
+- An interactive hardware run that presented 1468 frames, minimized/restored, resized the swap chain to 1920 by 1017, and exited cleanly.
+- Explicit WARP selection reported as Microsoft Basic Render Driver at feature level 12.1.
+- No matches for `ERROR`, `CORRUPTION`, `DEVICE_REMOVED`, `DEVICE_RESET`, or `failed` in the captured hardware-session log.
+
+Release execution, a complete captured WARP shutdown, multi-display movement, repeated Alt+Tab, a very-small-window stress case, and GitHub Actions were not supplied.
+
+## Acceptance criteria for the closure snapshot
+
+| Requirement | Status | Evidence | Validation command | Actually run on this snapshot | Remaining limitation |
 |---|---|---|---|---|---|
-| A-01 — Clean Configuration | NOT RUN | Debug and Release Visual Studio 2022 x64 presets are present and listed by CMake. | `cmake --preset windows-msvc-debug`; `cmake --preset windows-msvc-release` | No | Visual Studio generator and Windows SDK were unavailable. |
-| A-02 — Clean Compilation | NOT RUN | Targets, warning flags, x64 guard, and source dependencies are defined. GNU and Clang compiled the portable core with warnings-as-errors. | `cmake --build --preset windows-msvc-debug`; `cmake --build --preset windows-msvc-release` | No for Windows application; yes for portable core | MSVC compilation of Win32 and D3D12 translation units remains required. |
-| A-03 — Shader Compilation | NOT RUN | DXC custom commands declare VSMain `vs_6_0` and PSMain `ps_6_0` outputs with configuration-specific flags and HLSL dependencies. | Build either Windows preset. | No | DXC was unavailable in the container. |
-| A-04 — CPU Tests | PASS | One CTest registration executes five assertion-based cases covering command-line parsing, invalid arguments, HRESULT-style formatting, result preservation, and adapter policy. GNU and Clang runs passed. | `ctest --test-dir build-linux-tests --output-on-failure`; `ctest --test-dir build-linux-clang --output-on-failure` | Yes | Windows CTest presets still require local execution. |
-| A-05 — Window Lifecycle | NOT RUN | `Win32Window` owns registration, creation, message dispatch, size state, close handling, destruction, and class unregistration. | Launch Debug and perform the manual lifecycle checklist. | No | No Windows desktop session. |
-| A-06 — Device Initialization | NOT RUN | `D3D12Context` creates factory, adapter, device, queue, swap chain, RTV heap, frame allocators, command list, fence, and event. | Launch Debug hardware build. | No | No Windows SDK or D3D12 runtime. |
-| A-07 — Hardware Selection | NOT RUN | DXGI 1.6 high-performance enumeration is preferred, software candidates are rejected, D3D12 support is probed, and adapter properties are logged. | `Daedalus.exe --frames 120` | No | Requires a physical D3D12 adapter. |
-| A-08 — WARP Selection | NOT RUN | `--warp` calls `EnumWarpAdapter`; normal mode never silently switches to WARP. | `Daedalus.exe --warp --frames 120` | No | WARP is unavailable outside Windows. |
-| A-09 — Triangle Rendering | NOT RUN | The application loads DXC outputs, creates an empty root signature and PSO, binds three coloured vertices, clears, draws, and presents. | Launch Debug and visually inspect. | No | Visible output cannot be established in this environment. |
-| A-10 — Frame Synchronization | NOT RUN | Two frame resources each own an allocator and latest fence value; allocator reset is gated by completion. Full waits are limited to resize, explicit flush, and shutdown. | Debug-layer runtime plus repeated operation. | No | Requires queue execution and debug-layer observation. |
-| A-11 — Resource States | NOT RUN | Renderer records explicit back-buffer transitions in both directions every frame. | Debug-layer runtime. | No | Requires D3D12 command execution. |
-| A-12 — Resize Safety | NOT RUN | Zero-sized rendering is skipped; resize flushes, releases old buffers, calls `ResizeBuffers`, refreshes index, reacquires buffers, and recreates RTVs. | Manual repeated resize/minimize/restore checklist. | No | Requires interactive Windows execution. |
-| A-13 — Shutdown Safety | NOT RUN | Normal exit waits for GPU work; no-throw destruction signals and waits when possible, closes the event, and releases resources in dependency order. | Close button, frame-limited run, and WARP run. | No | Requires live queue work. |
-| A-14 — Diagnostics | PASS | Result helpers preserve the code, operation, and source location; tests verify formatting and exception preservation. Logging writes console, debugger, and session-file output. | CPU tests; source review. | Yes for portable helper tests | Windows system-message expansion and fatal message-box presentation remain unobserved. |
-| A-15 — Validation Honesty | PASS | This matrix separates source evidence from executed evidence and marks graphical checks unrun. | Review this document against command logs. | Yes | Local results must replace unrun rows after developer execution. |
-| A-16 — CI | NOT RUN | Workflow uses a Windows Server 2022 hosted runner, official checkout action, Debug configure/build/test, then Release configure/build/test. | Push branch or open a pull request. | No | No GitHub workflow run occurred during repository generation. |
-| A-17 — Documentation | PASS | README, architecture, acceptance, experiment log, and authoritative references match the delivered source and recorded limitations. | Source review and link check. | Yes | Runtime sections await local evidence. |
-| A-18 — Source Hygiene | PASS | Generated directories were removed; requested unfinished-work markers returned no matches; final ZIP entry inspection found no prohibited build products or restricted binaries. | Equivalent Python packaging and ZIP inspection recorded in the delivery manifest. | Yes | PowerShell was unavailable, so `package-source.ps1` received source review but was not executed. The separate delivery manifest remains outside the archive so it can contain the final archive hash. |
+| A-01 — Clean Configuration | BLOCKED | VS2022 and VS2026 Debug/Release presets are present, out-of-source, and parse correctly. | `cmake --preset windows-msvc-debug`; `cmake --preset windows-vs2026-debug`; corresponding Release presets | Preset parsing yes; Windows generation no | Exact closure snapshot requires Windows CMake generation. |
+| A-02 — Clean Compilation | BLOCKED | Portable core compiles under GNU and Clang with warnings-as-errors. Windows sources were changed by the closure patch. | Build all four Windows presets. | Portable builds yes; MSVC build no | Debug and Release MSVC builds are required. |
+| A-03 — Shader Compilation | BLOCKED | DXC commands and dependencies are unchanged; the baseline compiled both shaders. | Build a Windows preset. | No on closure snapshot | DXC must run again with the repaired snapshot. |
+| A-04 — CPU Tests | PASS | One CTest registration executes five assertion-based cases for command-line behavior, result diagnostics, and adapter policy. GNU and Clang runs pass. | `ctest --test-dir build-linux-gcc --output-on-failure`; Clang equivalent | Yes | Windows CTest should also be repeated. |
+| A-05 — Window Lifecycle | BLOCKED | Constructor cleanup now unregisters only a class owned by the object, destroys partial windows on failure, and clears `GWLP_USERDATA` at `WM_NCDESTROY`. Baseline lifecycle execution passed. | Manual Debug lifecycle checklist | Source reviewed; not executed after repair | Requires Windows regression run. |
+| A-06 — Device Initialization | BLOCKED | D3D12 device/queue/swap-chain/frame infrastructure remains implemented; fence event now has RAII ownership during partial construction. | Launch Debug hardware build. | No on closure snapshot | Requires live D3D12 initialization. |
+| A-07 — Hardware Selection | BLOCKED | Adapter policy is unchanged and CPU-tested; baseline selected and logged the RTX 4060 Ti. | `Daedalus.exe --frames 120` | No on closure snapshot | Requires hardware rerun. |
+| A-08 — WARP Selection | BLOCKED | `--warp` remains explicit and baseline selected Microsoft Basic Render Driver. | `Daedalus.exe --warp --frames 120` | No on closure snapshot | Capture clean WARP exit and exit code. |
+| A-09 — Triangle Rendering | BLOCKED | Draw path and shaders are unchanged; baseline visually rendered and presented. | Launch and visually inspect. | No on closure snapshot | Requires visual rerun. |
+| A-10 — Frame Synchronization | BLOCKED | Two allocator/fence frame resources remain. New `gpu_idle_proven_` tracking prevents redundant flushes while retaining fence-gated reuse. | Debug-layer runtime and source review | Source review only | Requires D3D12 debug-layer regression run. |
+| A-11 — Resource States | BLOCKED | Explicit `PRESENT -> RENDER_TARGET -> PRESENT` barriers remain unchanged. | Debug-layer runtime | No on closure snapshot | Requires command execution. |
+| A-12 — Resize Safety | BLOCKED | Existing flush/release/`ResizeBuffers`/reacquire path remains; baseline resize/minimize/restore passed. | Repeated resize/minimize/restore checklist | No on closure snapshot | Repeat including very small client size. |
+| A-13 — Shutdown Safety | BLOCKED | Exceptional cleanup now requires proof of GPU idleness before destroying renderer resources. The fence event is RAII-owned. If synchronization cannot be proven during fatal process exit, ownership is deliberately detached for operating-system cleanup rather than releasing potentially referenced GPU objects. | Hardware, WARP, close-button, and injected-failure testing | Source reviewed; normal runtime baseline predates fix | Exact repaired failure path needs Windows validation. |
+| A-14 — Diagnostics | PASS | Result helpers preserve code, operation, and source location; cleanup failures now log signal, event-registration, wait, window-destruction, and class-unregistration failures. CPU tests pass. | CPU tests and source review | Yes | Windows system-message expansion remains to be rerun. |
+| A-15 — Validation Honesty | PASS | This matrix separates baseline execution from exact-snapshot execution and does not promote unrerun Windows checks to PASS. | Review matrix against command logs. | Yes | Update after local closure rerun. |
+| A-16 — CI | NOT RUN | Workflow configures/builds/tests Debug and Release with the VS2022 presets. | Push branch or open pull request. | No | A successful hosted run is required. |
+| A-17 — Documentation | PASS | README, architecture, acceptance matrix, references, and agent log describe the repaired implementation and evidence boundary. | Documentation review | Yes | Add final Windows rerun results when available. |
+| A-18 — Source Hygiene | PASS | Exact archive is produced from a clean staging tree; `.git` is excluded rather than treated as an error; prohibited artefacts are inspected and absent. | Packaging and ZIP inspection recorded in delivery manifest | Yes through equivalent container procedure | PowerShell 5.1 execution remains to be confirmed locally. |
 
 ## Manual runtime checklist status
 
-Every item below is **NOT RUN** because the execution environment lacked a Windows graphical session and D3D12 runtime:
-
-1. Debug hardware launch and adapter confirmation.
-2. Visible coloured triangle confirmation.
-3. Thirty-second stable run.
-4. Repeated resize.
-5. Very small client-area resize.
-6. Minimize.
-7. Restore.
-8. Maximize.
-9. Multi-display movement.
-10. Repeated Alt+Tab.
-11. Close-button exit.
-12. `--frames 120` exit.
-13. WARP execution.
-14. Debugger and log inspection for D3D12 diagnostics.
-15. Debug and Release graphical execution.
+| Check | Baseline result | Closure snapshot status |
+|---|---|---|
+| Debug hardware launch and expected adapter | PASS | NOT RUN |
+| Coloured triangle visible | PASS by developer observation | NOT RUN |
+| Stable run for at least 30 seconds | NOT RUN; captured interactive run was about 19 seconds | NOT RUN |
+| Repeated resize | PASS | NOT RUN |
+| Very small client-area resize | NOT RUN | NOT RUN |
+| Minimize and restore | PASS | NOT RUN |
+| Maximize | Part of resize sequence but not explicitly recorded | NOT RUN |
+| Move between displays | NOT RUN | NOT RUN |
+| Repeated Alt+Tab | NOT RUN | NOT RUN |
+| Close-button clean exit | PASS | NOT RUN |
+| `--frames 120` clean exit | PASS, exit code zero | NOT RUN |
+| WARP selection | PASS for initialization | NOT RUN; complete exit evidence still needed |
+| Debugger/log diagnostics inspection | Application log scan passed | NOT RUN after repair |
+| Debug and Release execution | Debug PASS | Debug and Release NOT RUN after repair |
 
 ## Current campaign conclusion
 
-Campaign A has a complete source implementation and passes all CPU-only validation available in the generation environment. It cannot yet be declared fully accepted because A-01 through A-03, A-05 through A-13, and A-16 require Windows/MSVC/DXC, live D3D12 execution, or GitHub-hosted CI evidence.
+The closure patch addresses the three concrete audit defects: exceptional renderer teardown ordering, constructor-time raw-resource leakage, and packaging failure inside a normal Git checkout. It also adds first-class Visual Studio 2026 presets and helper-script selection.
+
+Campaign A is **not declared fully accepted yet** because the modified Windows source has not been rebuilt and rerun in Debug and Release, the hosted CI workflow has not supplied a successful run, and several manual stress checks remain outstanding. The remaining work is validation rather than another architectural implementation campaign.

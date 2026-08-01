@@ -1,14 +1,18 @@
 [CmdletBinding()]
 param(
     [ValidateSet("Debug", "Release")]
-    [string]$Configuration = "Debug"
+    [string]$Configuration = "Debug",
+    [ValidateSet("2022", "2026")]
+    [string]$VisualStudioVersion = "2022"
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$Preset = if ($Configuration -eq "Debug") { "windows-msvc-debug" } else { "windows-msvc-release" }
+$ConfigurationName = $Configuration.ToLowerInvariant()
+$PresetPrefix = if ($VisualStudioVersion -eq "2026") { "windows-vs2026" } else { "windows-msvc" }
+$Preset = "$PresetPrefix-$ConfigurationName"
 
 Push-Location $RepositoryRoot
 try {

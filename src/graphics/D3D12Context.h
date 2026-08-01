@@ -12,6 +12,8 @@
 #include <dxgi1_6.h>
 #include <wrl/client.h>
 
+#include "platform/UniqueWin32Handle.h"
+
 #include <array>
 #include <cstdint>
 #include <string>
@@ -46,6 +48,7 @@ public:
     void end_frame();
     void resize(std::uint32_t width, std::uint32_t height);
     void wait_for_gpu();
+    [[nodiscard]] bool prepare_for_shutdown() noexcept;
     void shutdown() noexcept;
 
     [[nodiscard]] ID3D12Device* device() const noexcept;
@@ -75,6 +78,8 @@ private:
     void create_swap_chain();
     void create_render_targets();
     void wait_for_fence(std::uint64_t value);
+    [[nodiscard]] bool try_wait_for_gpu() noexcept;
+    void abandon_resources() noexcept;
     [[nodiscard]] D3D12_CPU_DESCRIPTOR_HANDLE rtv_handle(std::uint32_t index) const noexcept;
 
     HWND window_ = nullptr;
@@ -84,11 +89,12 @@ private:
     bool using_warp_ = false;
     bool debug_layer_enabled_ = false;
     bool shutdown_complete_ = false;
+    bool gpu_idle_proven_ = true;
     UINT factory_flags_ = 0;
     UINT rtv_descriptor_size_ = 0;
     std::uint32_t current_frame_index_ = 0;
     std::uint64_t next_fence_value_ = 1;
-    HANDLE fence_event_ = nullptr;
+    UniqueWin32Handle fence_event_;
     std::string adapter_name_;
     std::uint64_t dedicated_video_memory_ = 0;
     D3D_FEATURE_LEVEL feature_level_ = D3D_FEATURE_LEVEL_11_0;

@@ -15,7 +15,7 @@ $OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
 
 $ForbiddenDirectoryNames = @(
     ".vs", ".vscode", ".idea", "build", "out", "bin", "obj", "Debug", "Release",
-    "RelWithDebInfo", "MinSizeRel", "x64", "CMakeFiles", "Testing", "__pycache__", ".git", "runtime"
+    "RelWithDebInfo", "MinSizeRel", "x64", "CMakeFiles", "Testing", "__pycache__", "runtime"
 )
 $ForbiddenFilePatterns = @(
     "CMakeCache.txt", "cmake_install.cmake", "CTestTestfile.cmake", "compile_commands.json",
@@ -26,6 +26,11 @@ $ForbiddenFilePatterns = @(
 $Violations = [System.Collections.Generic.List[string]]::new()
 Get-ChildItem -LiteralPath $RepositoryRoot -Recurse -Force | ForEach-Object {
     $Relative = $_.FullName.Substring($RepositoryRoot.Length).TrimStart([char[]]"\/")
+    $NormalizedRelative = $Relative.Replace('\', '/')
+    if ($NormalizedRelative -match '(^|/)\.git($|/)') {
+        return
+    }
+
     if ($_.PSIsContainer) {
         if ($ForbiddenDirectoryNames -contains $_.Name -or $_.Name -like "build-*") {
             $Violations.Add($Relative)
@@ -53,6 +58,18 @@ try {
     Get-ChildItem -LiteralPath $RepositoryRoot -Force | Where-Object { $_.Name -ne ".git" } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination $StagingRepository -Recurse -Force
     }
+
+    Get-ChildItem -LiteralPath $StagingRepository -Recurse -Force |
+        Where-Object { $_.Name -eq ".git" } |
+        Sort-Object FullName -Descending |
+        ForEach-Object {
+            if ($_.PSIsContainer) {
+                Remove-Item -LiteralPath $_.FullName -Recurse -Force
+            }
+            else {
+                Remove-Item -LiteralPath $_.FullName -Force
+            }
+        }
 
     if (Test-Path -LiteralPath $OutputPath) {
         Remove-Item -LiteralPath $OutputPath -Force

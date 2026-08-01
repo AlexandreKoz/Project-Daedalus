@@ -28,7 +28,8 @@ Win32Window::Win32Window(std::wstring title, std::uint32_t client_width, std::ui
     window_class.hbrBackground = nullptr;
     window_class.lpszClassName = class_name_.c_str();
 
-    if (RegisterClassExW(&window_class) == 0)
+    const ATOM registered_class = RegisterClassExW(&window_class);
+    if (registered_class == 0)
     {
         const DWORD error = GetLastError();
         if (error != ERROR_CLASS_ALREADY_EXISTS)
@@ -36,32 +37,43 @@ Win32Window::Win32Window(std::wstring title, std::uint32_t client_width, std::ui
             throw ResultError(static_cast<ResultCode>(HRESULT_FROM_WIN32(error)), "RegisterClassExW");
         }
     }
-    class_registered_ = true;
-
-    RECT rectangle{0, 0, static_cast<LONG>(client_width), static_cast<LONG>(client_height)};
-    const DWORD style = WS_OVERLAPPEDWINDOW;
-    if (AdjustWindowRectEx(&rectangle, style, FALSE, 0) == FALSE)
+    else
     {
-        throw ResultError(static_cast<ResultCode>(HRESULT_FROM_WIN32(GetLastError())), "AdjustWindowRectEx");
+        class_registered_ = true;
     }
 
-    window_ = CreateWindowExW(
-        0,
-        class_name_.c_str(),
-        title.c_str(),
-        style,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        rectangle.right - rectangle.left,
-        rectangle.bottom - rectangle.top,
-        nullptr,
-        nullptr,
-        instance_,
-        this);
-
-    if (window_ == nullptr)
+    try
     {
-        throw ResultError(static_cast<ResultCode>(HRESULT_FROM_WIN32(GetLastError())), "CreateWindowExW");
+        RECT rectangle{0, 0, static_cast<LONG>(client_width), static_cast<LONG>(client_height)};
+        const DWORD style = WS_OVERLAPPEDWINDOW;
+        if (AdjustWindowRectEx(&rectangle, style, FALSE, 0) == FALSE)
+        {
+            throw ResultError(static_cast<ResultCode>(HRESULT_FROM_WIN32(GetLastError())), "AdjustWindowRectEx");
+        }
+
+        window_ = CreateWindowExW(
+            0,
+            class_name_.c_str(),
+            title.c_str(),
+            style,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            rectangle.right - rectangle.left,
+            rectangle.bottom - rectangle.top,
+            nullptr,
+            nullptr,
+            instance_,
+            this);
+
+        if (window_ == nullptr)
+        {
+            throw ResultError(static_cast<ResultCode>(HRESULT_FROM_WIN32(GetLastError())), "CreateWindowExW");
+        }
+    }
+    catch (...)
+    {
+        destroy();
+        throw;
     }
 }
 
@@ -157,7 +169,12 @@ LRESULT Win32Window::handle_message(HWND native_window, UINT message, WPARAM wpa
     {
     case WM_CLOSE:
         close_requested_ = true;
-        DestroyWindow(window_);
+        if (DestroyWindow(native_window) == FALSE)
+        {
+            std::ostringstream stream;
+            stream << "DestroyWindow failed with Win32 error " << GetLastError();
+            Log::error(stream.str());
+        }
         return 0;
 
     case WM_DESTROY:
@@ -165,6 +182,14 @@ LRESULT Win32Window::handle_message(HWND native_window, UINT message, WPARAM wpa
         close_requested_ = true;
         PostQuitMessage(0);
         return 0;
+
+    case WM_NCDESTROY:
+        if (window_ == native_window)
+        {
+            window_ = nullptr;
+        }
+        SetWindowLongPtrW(native_window, GWLP_USERDATA, 0);
+        return DefWindowProcW(native_window, message, wparam, lparam);
 
     case WM_SIZE:
     {
@@ -202,7 +227,13 @@ void Win32Window::destroy() noexcept
 {
     if (window_ != nullptr)
     {
-        DestroyWindow(window_);
+        const HWND window = window_;
+        if (DestroyWindow(window) == FALSE)
+        {
+            std::ostringstream stream;
+            stream << "DestroyWindow failed during cleanup with Win32 error " << GetLastError();
+            Log::warning(stream.str());
+        }
         window_ = nullptr;
     }
 
