@@ -55,7 +55,7 @@ function(daedalus_compile_shader_pair target_name shader_source output_directory
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_configuration_output_directory}"
         COMMAND "${_dxc}"
             -nologo -WX -HV 2021 -T vs_6_0 -E VSMain
-            "$<$<CONFIG:Debug>:-Zi>" "$<$<CONFIG:Debug>:-Od>" "$<$<CONFIG:Debug>:-Qembed_debug>"
+            "$<$<CONFIG:Debug>:-Zi>" "$<$<CONFIG:Debug>:-O3>" "$<$<CONFIG:Debug>:-Qembed_debug>"
             "$<$<NOT:$<CONFIG:Debug>>:-O3>"
             -Fo "${_vertex_output}" "${shader_source}"
         DEPENDS "${shader_source}"
@@ -68,7 +68,7 @@ function(daedalus_compile_shader_pair target_name shader_source output_directory
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_configuration_output_directory}"
         COMMAND "${_dxc}"
             -nologo -WX -HV 2021 -T ps_6_0 -E PSMain
-            "$<$<CONFIG:Debug>:-Zi>" "$<$<CONFIG:Debug>:-Od>" "$<$<CONFIG:Debug>:-Qembed_debug>"
+            "$<$<CONFIG:Debug>:-Zi>" "$<$<CONFIG:Debug>:-O3>" "$<$<CONFIG:Debug>:-Qembed_debug>"
             "$<$<NOT:$<CONFIG:Debug>>:-O3>"
             -Fo "${_pixel_output}" "${shader_source}"
         DEPENDS "${shader_source}"
