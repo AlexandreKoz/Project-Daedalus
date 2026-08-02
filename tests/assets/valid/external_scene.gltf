@@ -1,0 +1,229 @@
+{
+  "asset": {
+    "version": "2.0",
+    "generator": "Daedalus fixture generator",
+    "copyright": "CC0 self-authored fixture"
+  },
+  "extensionsUsed": [
+    "KHR_lights_punctual"
+  ],
+  "buffers": [
+    {
+      "uri": "external_scene.bin",
+      "byteLength": 142
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 128,
+      "byteStride": 32
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 128,
+      "byteLength": 6
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 136,
+      "byteLength": 6
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "byteOffset": 0,
+      "componentType": 5126,
+      "count": 4,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 12,
+      "componentType": 5126,
+      "count": 4,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 24,
+      "componentType": 5126,
+      "count": 4,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5123,
+      "count": 3,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5123,
+      "count": 3,
+      "type": "SCALAR"
+    }
+  ],
+  "images": [
+    {
+      "name": "Checker",
+      "uri": "texture.png"
+    }
+  ],
+  "samplers": [
+    {
+      "name": "LinearRepeat",
+      "magFilter": 9729,
+      "minFilter": 9987,
+      "wrapS": 10497,
+      "wrapT": 10497
+    }
+  ],
+  "textures": [
+    {
+      "name": "CheckerTexture",
+      "source": 0,
+      "sampler": 0
+    }
+  ],
+  "materials": [
+    {
+      "name": "RedChecker",
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          1,
+          0.5,
+          0.5,
+          1
+        ],
+        "baseColorTexture": {
+          "index": 0
+        },
+        "metallicFactor": 0.0,
+        "roughnessFactor": 0.8
+      }
+    },
+    {
+      "name": "Blue",
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          0.2,
+          0.3,
+          1.0,
+          1
+        ],
+        "metallicFactor": 0.1,
+        "roughnessFactor": 0.4
+      },
+      "doubleSided": true
+    }
+  ],
+  "meshes": [
+    {
+      "name": "TwoPrimitiveQuad",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "TEXCOORD_0": 2
+          },
+          "indices": 3,
+          "material": 0
+        },
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "TEXCOORD_0": 2
+          },
+          "indices": 4,
+          "material": 1
+        }
+      ]
+    }
+  ],
+  "cameras": [
+    {
+      "name": "FixtureCamera",
+      "type": "perspective",
+      "perspective": {
+        "yfov": 0.8,
+        "znear": 0.1,
+        "zfar": 100.0,
+        "aspectRatio": 1.7777778
+      }
+    }
+  ],
+  "extensions": {
+    "KHR_lights_punctual": {
+      "lights": [
+        {
+          "name": "Key",
+          "type": "directional",
+          "color": [
+            1,
+            0.95,
+            0.9
+          ],
+          "intensity": 3.0
+        }
+      ]
+    }
+  },
+  "nodes": [
+    {
+      "name": "NegativeScaleRoot",
+      "mesh": 0,
+      "scale": [
+        -1,
+        1,
+        1
+      ],
+      "children": [
+        1
+      ]
+    },
+    {
+      "name": "CameraChild",
+      "camera": 0,
+      "translation": [
+        0,
+        0,
+        5
+      ]
+    },
+    {
+      "name": "LightRoot",
+      "extensions": {
+        "KHR_lights_punctual": {
+          "light": 0
+        }
+      },
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ]
+    }
+  ],
+  "scenes": [
+    {
+      "name": "Main",
+      "nodes": [
+        0,
+        2
+      ]
+    },
+    {
+      "name": "LightOnly",
+      "nodes": [
+        2
+      ]
+    }
+  ],
+  "scene": 0
+}

@@ -1,0 +1,11 @@
+# Import report schema
+
+Schema identifier: `daedalus.import-report/1`.
+
+The deterministic JSON report contains tool and canonical-schema versions, source display name/format/hash, settings, selected scene, asset key, object/vertex/index counts, local/world bounds, normalized dependency paths and hashes, extension inventories, ordered diagnostics, and final status.
+
+Statuses are `success`, `success_with_warnings`, `success_with_repairs`, `unsupported_feature`, `invalid_source`, `missing_dependency`, `io_failure`, `resource_limit`, and `internal_error`.
+
+Each diagnostic records severity, stable code, disposition, asset-relative location, message, and optional expected/observed values. Dispositions distinguish rejected, ignored, defaulted, converted, repaired, and observed behavior.
+
+The asset key hashes canonical schema version, tool interpretation settings, source content hash, normalized dependency identities/hashes, and stable extension-relevant inputs. Absolute checkout paths, timestamps, pointer values, random state, and unordered iteration are excluded. JSON objects use sorted keys and report arrays are deterministically ordered.

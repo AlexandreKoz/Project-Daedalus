@@ -9,7 +9,7 @@ Set-StrictMode -Version Latest
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $RepositoryParent = Split-Path -Parent $RepositoryRoot
 if (-not $OutputPath) {
-    $OutputPath = Join-Path $RepositoryParent "Project-Daedalus-Campaign-A.zip"
+    $OutputPath = Join-Path $RepositoryParent "Project-Daedalus-Campaign-B-source.zip"
 }
 $OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
 

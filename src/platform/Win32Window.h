@@ -9,6 +9,8 @@
 #endif
 #include <Windows.h>
 
+#include "rendering/OrbitCamera.h"
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -30,6 +32,8 @@ public:
     void show(int command_show);
     [[nodiscard]] bool process_messages();
     [[nodiscard]] std::optional<std::pair<std::uint32_t, std::uint32_t>> consume_resize();
+    [[nodiscard]] OrbitInput consume_orbit_input() noexcept;
+    [[nodiscard]] bool consume_reload_request() noexcept;
     [[nodiscard]] bool minimized() const noexcept;
     [[nodiscard]] bool close_requested() const noexcept;
     [[nodiscard]] HWND native_handle() const noexcept;
@@ -50,5 +54,10 @@ private:
     bool close_requested_ = false;
     bool resize_pending_ = false;
     bool class_registered_ = false;
+    bool left_dragging_ = false;
+    bool right_dragging_ = false;
+    POINT last_mouse_{};
+    OrbitInput orbit_input_{};
+    bool reload_requested_ = false;
 };
 }

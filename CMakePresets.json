@@ -7,12 +7,43 @@
   },
   "configurePresets": [
     {
+      "name": "portable-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "DAEDALUS_BUILD_APP": "OFF",
+        "DAEDALUS_BUILD_TESTS": "ON",
+        "DAEDALUS_BUILD_TOOLS": "ON",
+        "DAEDALUS_WARNINGS_AS_ERRORS": "ON",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "portable-debug",
+      "displayName": "Portable CPU Debug",
+      "inherits": "portable-base",
+      "binaryDir": "${sourceDir}/build/portable-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "portable-release",
+      "displayName": "Portable CPU Release",
+      "inherits": "portable-base",
+      "binaryDir": "${sourceDir}/build/portable-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
       "name": "windows-common-base",
       "hidden": true,
       "architecture": "x64",
       "cacheVariables": {
         "DAEDALUS_BUILD_APP": "ON",
         "DAEDALUS_BUILD_TESTS": "ON",
+        "DAEDALUS_BUILD_TOOLS": "ON",
         "DAEDALUS_WARNINGS_AS_ERRORS": "ON",
         "BUILD_TESTING": "ON"
       }
@@ -56,63 +87,19 @@
     }
   ],
   "buildPresets": [
-    {
-      "name": "windows-msvc-debug",
-      "configurePreset": "windows-msvc-debug",
-      "configuration": "Debug",
-      "jobs": 2
-    },
-    {
-      "name": "windows-msvc-release",
-      "configurePreset": "windows-msvc-release",
-      "configuration": "Release",
-      "jobs": 2
-    },
-    {
-      "name": "windows-vs2026-debug",
-      "configurePreset": "windows-vs2026-debug",
-      "configuration": "Debug",
-      "jobs": 2
-    },
-    {
-      "name": "windows-vs2026-release",
-      "configurePreset": "windows-vs2026-release",
-      "configuration": "Release",
-      "jobs": 2
-    }
+    { "name": "portable-debug", "configurePreset": "portable-debug", "jobs": 2 },
+    { "name": "portable-release", "configurePreset": "portable-release", "jobs": 2 },
+    { "name": "windows-msvc-debug", "configurePreset": "windows-msvc-debug", "configuration": "Debug", "jobs": 2 },
+    { "name": "windows-msvc-release", "configurePreset": "windows-msvc-release", "configuration": "Release", "jobs": 2 },
+    { "name": "windows-vs2026-debug", "configurePreset": "windows-vs2026-debug", "configuration": "Debug", "jobs": 2 },
+    { "name": "windows-vs2026-release", "configurePreset": "windows-vs2026-release", "configuration": "Release", "jobs": 2 }
   ],
   "testPresets": [
-    {
-      "name": "windows-msvc-debug",
-      "configurePreset": "windows-msvc-debug",
-      "configuration": "Debug",
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
-      "name": "windows-msvc-release",
-      "configurePreset": "windows-msvc-release",
-      "configuration": "Release",
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
-      "name": "windows-vs2026-debug",
-      "configurePreset": "windows-vs2026-debug",
-      "configuration": "Debug",
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
-      "name": "windows-vs2026-release",
-      "configurePreset": "windows-vs2026-release",
-      "configuration": "Release",
-      "output": {
-        "outputOnFailure": true
-      }
-    }
+    { "name": "portable-debug", "configurePreset": "portable-debug", "output": { "outputOnFailure": true } },
+    { "name": "portable-release", "configurePreset": "portable-release", "output": { "outputOnFailure": true } },
+    { "name": "windows-msvc-debug", "configurePreset": "windows-msvc-debug", "configuration": "Debug", "output": { "outputOnFailure": true } },
+    { "name": "windows-msvc-release", "configurePreset": "windows-msvc-release", "configuration": "Release", "output": { "outputOnFailure": true } },
+    { "name": "windows-vs2026-debug", "configurePreset": "windows-vs2026-debug", "configuration": "Debug", "output": { "outputOnFailure": true } },
+    { "name": "windows-vs2026-release", "configurePreset": "windows-vs2026-release", "configuration": "Release", "output": { "outputOnFailure": true } }
   ]
 }

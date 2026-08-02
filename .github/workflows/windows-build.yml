@@ -1,32 +1,47 @@
-name: Windows build
+name: Build and test
 
 on:
   push:
   pull_request:
 
 jobs:
-  build-and-test:
-    runs-on: windows-2022
-    timeout-minutes: 30
-
+  portable:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        preset: [portable-debug, portable-release]
     steps:
       - name: Check out source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+      - name: Validate controlled fixtures
+        run: |
+          build/${{ matrix.preset }}/DaedalusAssetValidator tests/assets/valid/minimal.glb --expect-success
+          build/${{ matrix.preset }}/DaedalusAssetValidator tests/assets/invalid/accessor_oob.gltf --expect-failure
 
+  windows-vs2022:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
       - name: Configure Debug
         run: cmake --preset windows-msvc-debug
-
       - name: Build Debug
         run: cmake --build --preset windows-msvc-debug
-
       - name: Test Debug
         run: ctest --preset windows-msvc-debug
-
       - name: Configure Release
         run: cmake --preset windows-msvc-release
-
       - name: Build Release
         run: cmake --build --preset windows-msvc-release
-
       - name: Test Release
         run: ctest --preset windows-msvc-release

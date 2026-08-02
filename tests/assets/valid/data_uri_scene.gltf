@@ -1,0 +1,221 @@
+{
+  "asset": {
+    "version": "2.0",
+    "generator": "Daedalus fixture generator"
+  },
+  "extensionsUsed": [
+    "KHR_mesh_quantization"
+  ],
+  "extensionsRequired": [
+    "KHR_mesh_quantization"
+  ],
+  "buffers": [
+    {
+      "uri": "data:application/octet-stream;base64,AAAAvwAAAL8AAAAAAAAAPwAAAL8AAAAAAAAAAAAAAD8AAAAAAAB/AAB/AAB/AAAA/38AAAAA/3//fwAAAAABgP9/AAAAAP9/AAD///////8AgAAA/wAAAP8AAAD/AAAAAAEC",
+      "byteLength": 99
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 36
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 36,
+      "byteLength": 9
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 48,
+      "byteLength": 24
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 72,
+      "byteLength": 12
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 84,
+      "byteLength": 9
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 96,
+      "byteLength": 3
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5120,
+      "normalized": true,
+      "count": 3,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5122,
+      "normalized": true,
+      "count": 3,
+      "type": "VEC4"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5123,
+      "normalized": true,
+      "count": 3,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 4,
+      "componentType": 5121,
+      "normalized": true,
+      "count": 3,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 5,
+      "componentType": 5121,
+      "count": 3,
+      "type": "SCALAR"
+    }
+  ],
+  "images": [
+    {
+      "name": "DataColorImage",
+      "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGPYUvH/PwAHOgMrdeBhGgAAAABJRU5ErkJggg=="
+    },
+    {
+      "name": "DataLinearImage",
+      "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNoaPj/HwAGggL/s75RMwAAAABJRU5ErkJggg=="
+    }
+  ],
+  "samplers": [
+    {
+      "name": "NearestClamp",
+      "magFilter": 9728,
+      "minFilter": 9728,
+      "wrapS": 33071,
+      "wrapT": 33648
+    },
+    {
+      "name": "LinearRepeat",
+      "magFilter": 9729,
+      "minFilter": 9987,
+      "wrapS": 10497,
+      "wrapT": 10497
+    }
+  ],
+  "textures": [
+    {
+      "name": "DataColorTexture",
+      "source": 0,
+      "sampler": 0
+    },
+    {
+      "name": "DataLinearTexture",
+      "source": 1,
+      "sampler": 1
+    }
+  ],
+  "materials": [
+    {
+      "name": "MetadataExercise",
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          0.8,
+          0.7,
+          0.6,
+          0.5
+        ],
+        "baseColorTexture": {
+          "index": 0,
+          "texCoord": 0
+        },
+        "metallicFactor": 0.25,
+        "roughnessFactor": 0.75,
+        "metallicRoughnessTexture": {
+          "index": 1,
+          "texCoord": 0
+        }
+      },
+      "normalTexture": {
+        "index": 1,
+        "texCoord": 0,
+        "scale": 0.5
+      },
+      "occlusionTexture": {
+        "index": 1,
+        "texCoord": 0,
+        "strength": 0.6
+      },
+      "emissiveTexture": {
+        "index": 0,
+        "texCoord": 0
+      },
+      "emissiveFactor": [
+        0.1,
+        0.2,
+        0.3
+      ],
+      "alphaMode": "MASK",
+      "alphaCutoff": 0.4,
+      "doubleSided": true
+    }
+  ],
+  "meshes": [
+    {
+      "name": "NormalizedTriangle",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "TANGENT": 2,
+            "TEXCOORD_0": 3,
+            "COLOR_0": 4
+          },
+          "indices": 5,
+          "material": 0
+        }
+      ]
+    }
+  ],
+  "cameras": [
+    {
+      "name": "Ortho",
+      "type": "orthographic",
+      "orthographic": {
+        "xmag": 2.0,
+        "ymag": 1.0,
+        "znear": 0.1,
+        "zfar": 10.0
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "name": "NormalizedNode",
+      "mesh": 0,
+      "camera": 0
+    }
+  ],
+  "scenes": [
+    {
+      "name": "DataUri",
+      "nodes": [
+        0
+      ]
+    }
+  ],
+  "scene": 0
+}

@@ -16,6 +16,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <string>
 
 namespace daedalus
@@ -48,6 +49,7 @@ public:
     void end_frame();
     void resize(std::uint32_t width, std::uint32_t height);
     void wait_for_gpu();
+    void execute_immediate(const std::function<void(ID3D12GraphicsCommandList*)>& record);
     [[nodiscard]] bool prepare_for_shutdown() noexcept;
     void shutdown() noexcept;
 

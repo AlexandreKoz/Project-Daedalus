@@ -17,12 +17,9 @@ function(daedalus_find_dxc output_variable)
 
     if(WIN32)
         if(DEFINED ENV{WindowsSdkDir} AND DEFINED ENV{WindowsSDKVersion})
-            list(APPEND _candidate_paths
-                "$ENV{WindowsSdkDir}/bin/$ENV{WindowsSDKVersion}/x64/dxc.exe")
+            list(APPEND _candidate_paths "$ENV{WindowsSdkDir}/bin/$ENV{WindowsSDKVersion}/x64/dxc.exe")
         endif()
-
-        file(GLOB _sdk_dxc_candidates LIST_DIRECTORIES false
-            "C:/Program Files (x86)/Windows Kits/10/bin/*/x64/dxc.exe")
+        file(GLOB _sdk_dxc_candidates LIST_DIRECTORIES false "C:/Program Files (x86)/Windows Kits/10/bin/*/x64/dxc.exe")
         list(SORT _sdk_dxc_candidates COMPARE NATURAL ORDER DESCENDING)
         list(APPEND _candidate_paths ${_sdk_dxc_candidates})
     endif()
@@ -45,13 +42,13 @@ function(daedalus_find_dxc output_variable)
         "then set -DDXC_PATH=<path-to-dxc.exe> or the DXC_PATH environment variable. FXC fallback is not supported.")
 endfunction()
 
-function(daedalus_compile_triangle_shaders target_name shader_source output_directory)
+function(daedalus_compile_shader_pair target_name shader_source output_directory vertex_filename pixel_filename)
     daedalus_find_dxc(_dxc)
     message(STATUS "Using DirectX Shader Compiler: ${_dxc}")
 
     set(_configuration_output_directory "${output_directory}/$<CONFIG>")
-    set(_vertex_output "${_configuration_output_directory}/TriangleVS.dxil")
-    set(_pixel_output "${_configuration_output_directory}/TrianglePS.dxil")
+    set(_vertex_output "${_configuration_output_directory}/${vertex_filename}")
+    set(_pixel_output "${_configuration_output_directory}/${pixel_filename}")
 
     add_custom_command(
         OUTPUT "${_vertex_output}"
@@ -62,7 +59,7 @@ function(daedalus_compile_triangle_shaders target_name shader_source output_dire
             "$<$<NOT:$<CONFIG:Debug>>:-O3>"
             -Fo "${_vertex_output}" "${shader_source}"
         DEPENDS "${shader_source}"
-        COMMENT "Compiling Triangle vertex shader with DXC"
+        COMMENT "Compiling diagnostic vertex shader with DXC"
         COMMAND_EXPAND_LISTS
         VERBATIM)
 
@@ -75,7 +72,7 @@ function(daedalus_compile_triangle_shaders target_name shader_source output_dire
             "$<$<NOT:$<CONFIG:Debug>>:-O3>"
             -Fo "${_pixel_output}" "${shader_source}"
         DEPENDS "${shader_source}"
-        COMMENT "Compiling Triangle pixel shader with DXC"
+        COMMENT "Compiling diagnostic pixel shader with DXC"
         COMMAND_EXPAND_LISTS
         VERBATIM)
 

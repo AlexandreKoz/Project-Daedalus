@@ -1,0 +1,31 @@
+{
+  "license": "CC0-1.0; all fixtures are generated and self-authored",
+  "valid": [
+    "minimal.glb",
+    "external_scene.gltf",
+    "embedded_image.glb",
+    "data_uri_scene.gltf",
+    "jpeg_image.gltf",
+    "stale_bounds.gltf"
+  ],
+  "invalid": [
+    "malformed_json.gltf",
+    "corrupted_header.glb",
+    "missing_buffer.gltf",
+    "missing_image.gltf",
+    "accessor_oob.gltf",
+    "invalid_stride.gltf",
+    "index_oob.gltf",
+    "nonfinite_attribute.gltf",
+    "unsupported_required_extension.gltf",
+    "unsupported_primitive_mode.gltf",
+    "invalid_parent.gltf",
+    "unsupported_image.gltf",
+    "truncated_png.gltf",
+    "invalid_base64.gltf",
+    "network_uri.gltf",
+    "path_traversal.gltf",
+    "material_out_of_range.gltf",
+    "quantization_not_required.gltf"
+  ]
+}

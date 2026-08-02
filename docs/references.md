@@ -1,26 +1,13 @@
-# Authoritative references
+# References
 
-Access date for every source below: **2026-07-30**.
+Normative implementation reference:
 
-| Source title | Organization | Consulted for | How Project Daedalus uses it |
-|---|---|---|---|
-| [Creating a basic Direct3D 12 component](https://learn.microsoft.com/en-us/windows/win32/direct3d12/creating-a-basic-direct3d-12-component) | Microsoft | Foundational initialization and triangle flow | Cross-checked the expected order for debug setup, device and queue creation, swap chain, RTV heap, frame resources, root signature, PSO, command recording, presentation, and fence synchronization. |
-| [Direct3D 12 programming guide](https://learn.microsoft.com/en-us/windows/win32/direct3d12/directx-12-programming-guide) | Microsoft | API ownership and explicit synchronization model | Used to keep resource-state and synchronization responsibility in the application rather than relying on implicit behavior. |
-| [IDXGIFactory6::EnumAdapterByGpuPreference](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_6/nf-dxgi1_6-idxgifactory6-enumadapterbygpupreference) | Microsoft | Modern adapter enumeration | Normal hardware mode queries adapters in high-performance preference order when DXGI 1.6 is available. |
-| [D3D12CreateDevice](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-d3d12createdevice) | Microsoft | Adapter capability probing and device creation | Candidates are probed without retaining a device, then the selected adapter is used for descending feature-level creation attempts. |
-| [Swap chains](https://learn.microsoft.com/en-us/windows/win32/direct3d12/swap-chains) | Microsoft | D3D12 presentation model | Informed explicit back-buffer indexing, frame-count fencing, and flip-model presentation. |
-| [IDXGISwapChain3::GetCurrentBackBufferIndex](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_4/nf-dxgi1_4-idxgiswapchain3-getcurrentbackbufferindex) | Microsoft | Current frame selection | Daedalus always obtains the active buffer index from DXGI after creation, presentation, and resizing. |
-| [IDXGISwapChain::ResizeBuffers](https://learn.microsoft.com/en-us/windows/win32/api/dxgi/nf-dxgi-idxgiswapchain-resizebuffers) | Microsoft | Safe swap-chain resize | The resize path releases all back-buffer references before requesting replacement buffers and then recreates RTVs. |
-| [Using resource barriers to synchronize resource states in Direct3D 12](https://learn.microsoft.com/en-us/windows/win32/direct3d12/using-resource-barriers-to-synchronize-resource-states-in-direct3d-12) | Microsoft | Back-buffer state transitions | The renderer records explicit transition barriers before render-target use and before presentation. |
-| [Executing and synchronizing command lists](https://learn.microsoft.com/en-us/windows/win32/direct3d12/executing-and-synchronizing-command-lists) | Microsoft | Queue execution and fences | Used for monotonically increasing queue signals and CPU event waits only when reuse or a full flush requires them. |
-| [Creating and recording command lists and bundles](https://learn.microsoft.com/en-us/windows/win32/direct3d12/recording-command-lists-and-bundles) | Microsoft | Allocator reuse rules | Each swap-chain frame owns an allocator that is reset only after its stored fence value completes. |
-| [Understanding the D3D12 debug layer](https://learn.microsoft.com/en-us/windows/win32/direct3d12/understanding-the-d3d12-debug-layer) | Microsoft | Debug-layer timing and validation | Debug support is requested before device creation and absence of Graphics Tools is reported clearly. |
-| [ID3D12InfoQueue::SetBreakOnSeverity](https://learn.microsoft.com/en-us/windows/win32/api/d3d12sdklayers/nf-d3d12sdklayers-id3d12infoqueue-setbreakonseverity) | Microsoft | Debugger break policy | Corruption and error messages request debugger breaks; warnings remain visible and are not broadly filtered. |
-| [DirectX Graphics Samples](https://github.com/microsoft/DirectX-Graphics-Samples) | Microsoft | Official implementation cross-checks | Consulted for API call patterns and naming conventions while retaining an original repository structure and ownership model. |
-| [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler) | Microsoft | DXC capabilities and Shader Model 6 | Confirms `dxc.exe` as the command-line compiler for Shader Model 6+; the build targets `vs_6_0` and `ps_6_0`. |
-| [cmake-presets(7)](https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html) | Kitware | Shared configure, build, and test presets | Used for tracked Visual Studio 2022 and Visual Studio 2026 x64 Debug and Release presets with out-of-source binary directories. |
-| [add_custom_command](https://cmake.org/cmake/help/latest/command/add_custom_command.html) | Kitware | Shader build dependencies and generated outputs | Each shader entry point is a declared generated output depending on the HLSL source. |
-| [CTest](https://cmake.org/cmake/help/latest/manual/ctest.1.html) | Kitware | CPU test registration and execution | The dependency-free test executable is registered through `add_test` and invoked by the documented test presets. |
-| [Choosing the runner for a job](https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job) | GitHub | Windows hosted runner selection | CI uses `windows-2022` to match the Visual Studio 2022 target. |
-| [Understanding GitHub Actions](https://docs.github.com/en/actions/get-started/understand-github-actions) | GitHub | Workflow structure and job isolation | Used to structure checkout, Debug validation, and Release validation as deterministic workflow steps. |
-| [actions/checkout](https://github.com/actions/checkout) | GitHub | Official source checkout action | The workflow uses the current stable major action referenced during research. |
+- Khronos Group, *glTF 2.0 Specification* and registry schemas.
+
+Platform references used by the Windows path:
+
+- Microsoft Direct3D 12 documentation for committed resources, copyable footprints, resource barriers, root signatures, descriptor heaps, fences, and debug-layer behavior.
+- Microsoft Windows Imaging Component documentation for stream decode and RGBA conversion.
+- Microsoft DirectX Shader Compiler documentation for Shader Model 6 compilation.
+
+No reference implementation or sample code is vendored. The importer and fixtures are project-owned. This document lists semantic references only and does not imply runtime conformance certification.

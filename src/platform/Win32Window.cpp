@@ -3,6 +3,8 @@
 #include "core/Error.h"
 #include "core/Log.h"
 
+#include <windowsx.h>
+
 #include <sstream>
 #include <stdexcept>
 
@@ -115,6 +117,20 @@ std::optional<std::pair<std::uint32_t, std::uint32_t>> Win32Window::consume_resi
     return std::pair{client_width_, client_height_};
 }
 
+OrbitInput Win32Window::consume_orbit_input() noexcept
+{
+    const OrbitInput result = orbit_input_;
+    orbit_input_ = {};
+    return result;
+}
+
+bool Win32Window::consume_reload_request() noexcept
+{
+    const bool result = reload_requested_;
+    reload_requested_ = false;
+    return result;
+}
+
 bool Win32Window::minimized() const noexcept
 {
     return minimized_ || client_width_ == 0 || client_height_ == 0;
@@ -215,12 +231,76 @@ LRESULT Win32Window::handle_message(HWND native_window, UINT message, WPARAM wpa
         return 0;
     }
 
+    case WM_LBUTTONDOWN:
+        left_dragging_ = true;
+        last_mouse_ = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        SetCapture(native_window);
+        return 0;
+
+    case WM_LBUTTONUP:
+        left_dragging_ = false;
+        if (!right_dragging_) ReleaseCapture();
+        return 0;
+
+    case WM_RBUTTONDOWN:
+        right_dragging_ = true;
+        last_mouse_ = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        SetCapture(native_window);
+        return 0;
+
+    case WM_RBUTTONUP:
+        right_dragging_ = false;
+        if (!left_dragging_) ReleaseCapture();
+        return 0;
+
+    case WM_MOUSEMOVE:
+    {
+        const POINT current{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        const float delta_x = static_cast<float>(current.x - last_mouse_.x);
+        const float delta_y = static_cast<float>(current.y - last_mouse_.y);
+        if (left_dragging_)
+        {
+            orbit_input_.orbit_delta_x += delta_x;
+            orbit_input_.orbit_delta_y += delta_y;
+        }
+        if (right_dragging_)
+        {
+            orbit_input_.pan_delta_x += delta_x;
+            orbit_input_.pan_delta_y += delta_y;
+        }
+        last_mouse_ = current;
+        return 0;
+    }
+
+    case WM_MOUSEWHEEL:
+        orbit_input_.zoom_delta += static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / static_cast<float>(WHEEL_DELTA);
+        return 0;
+
+    case WM_KEYDOWN:
+        if (wparam == 'R')
+        {
+            orbit_input_.reset = true;
+            return 0;
+        }
+        if (wparam == VK_F5)
+        {
+            reload_requested_ = true;
+            return 0;
+        }
+        break;
+
+    case WM_CAPTURECHANGED:
+        left_dragging_ = false;
+        right_dragging_ = false;
+        return 0;
+
     case WM_ERASEBKGND:
         return 1;
 
     default:
         return DefWindowProcW(native_window, message, wparam, lparam);
     }
+    return DefWindowProcW(native_window, message, wparam, lparam);
 }
 
 void Win32Window::destroy() noexcept

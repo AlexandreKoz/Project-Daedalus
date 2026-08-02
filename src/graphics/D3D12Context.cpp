@@ -143,6 +143,33 @@ void D3D12Context::resize(std::uint32_t width, std::uint32_t height)
     Log::info(stream.str());
 }
 
+void D3D12Context::execute_immediate(const std::function<void(ID3D12GraphicsCommandList*)>& record)
+{
+    if (!record)
+    {
+        throw std::invalid_argument("execute_immediate requires a recording callback");
+    }
+
+    wait_for_gpu();
+    FrameResource& frame = frames_.at(current_frame_index_);
+    DAEDALUS_THROW_IF_FAILED(frame.command_allocator->Reset());
+    DAEDALUS_THROW_IF_FAILED(command_list_->Reset(frame.command_allocator.Get(), nullptr));
+    record(command_list_.Get());
+    DAEDALUS_THROW_IF_FAILED(command_list_->Close());
+    ID3D12CommandList* command_lists[] = {command_list_.Get()};
+    command_queue_->ExecuteCommandLists(1, command_lists);
+    gpu_idle_proven_ = false;
+
+    const std::uint64_t signal_value = next_fence_value_++;
+    DAEDALUS_THROW_IF_FAILED(command_queue_->Signal(fence_.Get(), signal_value));
+    wait_for_fence(signal_value);
+    for (FrameResource& resource : frames_)
+    {
+        resource.fence_value = 0;
+    }
+    gpu_idle_proven_ = true;
+}
+
 void D3D12Context::wait_for_gpu()
 {
     if (gpu_idle_proven_ || command_queue_ == nullptr || fence_ == nullptr || !fence_event_)
