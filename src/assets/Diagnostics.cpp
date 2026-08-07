@@ -82,6 +82,11 @@ std::string_view to_string(DiagnosticCode value) noexcept
     case DiagnosticCode::unsafe_dependency_path: return "unsafe_dependency_path";
     case DiagnosticCode::invalid_image: return "invalid_image";
     case DiagnosticCode::unsupported_image_encoding: return "unsupported_image_encoding";
+    case DiagnosticCode::resource_budget_exceeded: return "resource_budget_exceeded";
+    case DiagnosticCode::missing_texture_coordinate: return "missing_texture_coordinate";
+    case DiagnosticCode::attribute_normalized: return "attribute_normalized";
+    case DiagnosticCode::rotation_normalized: return "rotation_normalized";
+    case DiagnosticCode::invalid_unit_vector: return "invalid_unit_vector";
     case DiagnosticCode::texture_transform_unsupported: return "texture_transform_unsupported";
     case DiagnosticCode::default_scene_selected: return "default_scene_selected";
     case DiagnosticCode::implicit_scene_created: return "implicit_scene_created";

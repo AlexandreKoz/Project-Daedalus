@@ -54,6 +54,16 @@ std::string ImportReport::to_json() const
     count_object.emplace("vertices", counts.vertices);
     root.emplace("counts", std::move(count_object));
 
+    JsonValue::Object resource_usage_object;
+    resource_usage_object.emplace("buffer_payload_bytes", resource_usage.buffer_payload_bytes);
+    resource_usage_object.emplace("canonical_geometry_bytes", resource_usage.canonical_geometry_bytes);
+    resource_usage_object.emplace("conservative_peak_bytes", resource_usage.conservative_peak_bytes);
+    resource_usage_object.emplace("decoded_image_bytes", resource_usage.decoded_image_bytes);
+    resource_usage_object.emplace("encoded_image_bytes", resource_usage.encoded_image_bytes);
+    resource_usage_object.emplace("retained_bytes", resource_usage.retained_bytes);
+    resource_usage_object.emplace("source_payload_bytes", resource_usage.source_payload_bytes);
+    root.emplace("resource_usage", std::move(resource_usage_object));
+
     JsonValue::Array dependency_array;
     for (const DependencyRecord& dependency : dependencies)
     {
@@ -144,6 +154,7 @@ ImportReport make_import_report(const CanonicalScene& scene,
     report.diagnostics = std::move(diagnostics);
     sort_diagnostics(report.diagnostics);
 
+    report.resource_usage = scene.source.resource_usage;
     report.counts.scenes = scene.scenes.size();
     report.counts.nodes = scene.nodes.size();
     report.counts.meshes = scene.meshes.size();

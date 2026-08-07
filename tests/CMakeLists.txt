@@ -11,7 +11,7 @@ daedalus_apply_project_warnings(DaedalusSceneTests)
 add_test(NAME Daedalus.Scene COMMAND DaedalusSceneTests)
 
 add_executable(DaedalusAssetTests AssetTests.cpp TestHarness.h)
-target_link_libraries(DaedalusAssetTests PRIVATE daedalus_assets)
+target_link_libraries(DaedalusAssetTests PRIVATE daedalus_assets daedalus_rendering)
 target_include_directories(DaedalusAssetTests PRIVATE "${PROJECT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(DaedalusAssetTests PRIVATE "DAEDALUS_FIXTURE_ROOT=\"${PROJECT_SOURCE_DIR}/tests/assets\"")
 daedalus_apply_project_warnings(DaedalusAssetTests)

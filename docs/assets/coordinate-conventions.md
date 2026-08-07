@@ -8,3 +8,9 @@
 - Tangent XYZ and W handedness are preserved. Missing tangents default to `(1,0,0,+1)` with a warning; Campaign B does not reconstruct tangent space.
 - Bounds are recomputed in canonical local space and transformed using all eight corners for world bounds.
 - Base-colour and emissive textures are classified sRGB; normal, metallic-roughness, and occlusion data are linear. A texture referenced in conflicting roles is conservatively retained with deterministic metadata and should be split or diagnosed in future schema revisions.
+
+## Tangent and UV diagnostics
+
+`--diagnostic tangents` transforms tangent XYZ into world orientation and encodes direction in red/green while blue distinguishes positive versus negative handedness. Negative world determinant multiplies tangent sign at the renderer boundary. This diagnostic proves transport only; it is not normal mapping.
+
+HLSL chooses `uv0` or `uv1` using the per-draw `texture_coord_set` constant. No UV0 fallback occurs when a material requests UV1; the importer rejects that mismatch before runtime preparation.

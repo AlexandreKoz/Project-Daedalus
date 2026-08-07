@@ -6,7 +6,11 @@
     "embedded_image.glb",
     "data_uri_scene.gltf",
     "jpeg_image.gltf",
-    "stale_bounds.gltf"
+    "stale_bounds.gltf",
+    "material_default.gltf",
+    "uv1_scene.gltf",
+    "instanced_tangents.gltf",
+    "repaired_vectors.gltf"
   ],
   "invalid": [
     "malformed_json.gltf",
@@ -26,6 +30,13 @@
     "network_uri.gltf",
     "path_traversal.gltf",
     "material_out_of_range.gltf",
-    "quantization_not_required.gltf"
+    "quantization_not_required.gltf",
+    "missing_uv1.gltf",
+    "corrupt_entropy_png.gltf",
+    "corrupt_entropy_jpeg.gltf",
+    "zero_normal.gltf",
+    "zero_tangent.gltf",
+    "zero_quaternion.gltf",
+    "budget_overflow.gltf"
   ]
 }

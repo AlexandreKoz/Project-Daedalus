@@ -1,50 +1,71 @@
-# Campaign B adversarial audit
+# Campaign B audit-closure adversarial re-audit
 
-## Method
+**Date:** 2026-08-07  
+**Baseline archive:** `Project-Daedalus-main(3)(1).zip`  
+**Baseline SHA-256:** `5397703f3cba8f4649f46f1ed2844a14f82198a9888dde2b34303bdf2348da32`  
+**Suggested branch/PR:** `fix/campaign-b-audit-closure`
 
-The final source snapshot was reviewed as if the campaign claims were false. The audit searched for API/importer leakage, dangling parser storage, unchecked arithmetic, semantic accessor mistakes, weak image/URI validation, nondeterministic reports, GPU lifetime races, stale parallel paths, false evidence, unusable fixtures, scope creep, and prohibited package contents.
+## Verdict
 
-## Checks and findings
+All original source-level semantic findings F-01 through F-07 and process/package findings F-09/F-10 are repaired and covered by new tests or deterministic delivery evidence. F-08 now has a focused real-runtime stress path and post-teardown live-object reporting implementation, but execution on the exact closure snapshot is blocked in the Linux delivery environment. Campaign B therefore receives semantic/portable closure, not unconditional final acceptance.
 
-- **Canonical contamination:** recursive searches of `src/scene` and `src/assets` public headers found no D3D12, DXGI, Windows, COM, WIC, JSON-DOM, or importer-private structures. PASS.
-- **Direct rendering from parser data:** the application passes `CanonicalScene` to `DiagnosticSceneRenderer`; JSON/glTF intermediates remain translation-unit local. PASS.
-- **Temporary-memory escape:** canonical strings, vectors, indices, vertices, dependencies, and encoded images are copied and owned. PASS.
-- **Accessor arithmetic and semantics:** checked 64-bit offset/stride/count arithmetic is bounded against view and buffer sizes; semantic shape/component rules, normalized conversion, index ranges, VEC3/VEC4 colours, and `KHR_mesh_quantization` requirements are exercised. PASS for portable code and fixtures.
-- **Bounds trust:** source `min`/`max` are compared with decoded POSITION bounds and stale values produce a visible repair. PASS.
-- **Material validation:** finite values and glTF factor/range constraints are checked before canonical insertion. PASS.
-- **Graph validation:** invalid references, cycles, multiple parents, non-finite transforms, and singular transforms are handled distinctly. PASS.
-- **URI and base64 safety:** network/drive/absolute paths, traversal, backslashes, NUL, malformed percent escapes, and non-canonical base64 padding are rejected. Symlink-resolved external dependencies must remain inside the asset root. PASS.
-- **Image validation:** PNG chunk framing, CRCs, IHDR fields, IDAT/IEND presence and dimensions are checked; JPEG frame/scan/end structure and supported component counts are checked. Base-colour/emissive references are sRGB and data textures linear. WIC decode disagreement with portable dimensions aborts. Portable PASS; runtime decode BLOCKED.
-- **Handedness/winding:** importer performs no scattered conversion; canonical data remains right-handed and CCW. Tangent W and negative determinant survive import; Campaign B disables culling. Portable/source PASS; visual proof BLOCKED.
-- **Upload lifetime:** staging resources survive until synchronous `execute_immediate` signals and waits. Explicit barriers and row-pitch copies are present. Source review PASS; execution BLOCKED.
-- **Cross-frame constants:** per-frame constant-buffer slices prevent CPU overwrite while another frame may still be in flight. Source review PASS; execution BLOCKED.
-- **Texture view legality:** typeless RGBA8 resources back both UNORM and UNORM_SRGB SRVs instead of creating incompatible views of a typed resource. Source review PASS; execution BLOCKED.
-- **Descriptor lifetime/reload:** renderer-owned heaps and resources are replaced only after a GPU-idle wait; `F5` exposes real in-process reload. Runtime stress remains BLOCKED rather than inferred.
-- **Determinism:** reports and keys matched byte-for-byte from different absolute roots; dependency/report ordering is stable. PASS.
-- **Fixture independence:** all 6 valid/degraded and 18 invalid manifest entries were run through the real importer; fixture regeneration was byte-identical. PASS.
-- **Legacy parallel path:** `TriangleRenderer.*` and `Triangle.hlsl` were removed; the fallback triangle is a canonical scene consumed by the same renderer. PASS.
-- **Campaign scope:** no production PBR, DXR, path tracing, DLSS, animation, persistent cache, editor, ECS, render graph, or compatibility-format claim was introduced. PASS.
-- **Unsupported claims:** Windows/D3D12 rows remain BLOCKED or NOT RUN. PASS.
-- **Package contents:** the delivery procedure rejects build trees, binaries, DXIL, logs, caches, IDE state, nested archives, restricted SDKs, secrets, and unauthorized assets. PASS after extracted-archive scan.
+## Finding-by-finding disposition
 
-## Defects found and repaired during hostile review
+### F-01 — omitted material semantics: CLOSED
 
-1. Split root I/O failure from missing external dependency status.
-2. Promoted orbit-camera logic into a portable tested library.
-3. Removed the legacy triangle renderer/shader to eliminate a parallel runtime path.
-4. Added portable CI/presets so importer tests do not require D3D12.
-5. Added source accessor `min`/`max` auditing and a stale-bounds repair fixture.
-6. Added semantic accessor rules, VEC3 colour handling, `KHR_mesh_quantization`, and material-range validation.
-7. Replaced permissive base64 and shallow image sniffing with strict base64, PNG CRC/chunk validation, and JPEG structural validation.
-8. Hardened URI resolution against network/drive paths, traversal, and symlink escape.
-9. Removed a duplicate `DiagnosticSceneRenderer::record` definition discovered by source inspection.
-10. Partitioned constant-buffer memory per frame to remove a possible queued-frame overwrite race.
-11. Changed texture resources to typeless RGBA8 so linear and sRGB SRVs are legal.
-12. Added checked conversions for D3D12 descriptor and byte-size limits.
-13. Ensured the built-in canonical scene can also emit a requested import report.
+`Primitive::material` remains invalid when glTF omits `material`; `CanonicalScene::default_material` represents the normative default. Source material indices are not shifted. `material_default.gltf` and runtime-neutral draw-preparation assertions prove explicit material 0 and omitted default remain distinct.
 
-No failing production test was disabled, no acceptance path was replaced by a mock, and no Windows success was inferred from source review.
+### F-02 — `textureInfo.texCoord`: CLOSED
 
-## Residual risks
+All supported texture references retain set 0/1. Primitive/material validation rejects missing referenced sets with `missing_texture_coordinate`. `PreparedDiagnosticDraw::texture_coord_set` reaches `DrawConstants`, and HLSL selects `uv0`/`uv1`. `uv1_scene.gltf` makes accidental UV0 selection numerically and visually obvious.
 
-The Windows translation units and HLSL could not be compiled in this environment. Root-signature compatibility, row-pitch behavior on a live device, descriptor binding, visual orientation, WIC decode, debug-layer cleanliness, hardware/WARP behavior, reload/resize stress, and shutdown/live-object behavior remain the principal unresolved risks. The acceptance matrix classifies them accordingly.
+### F-03 — full image decode boundary: CLOSED
+
+`assets/ImageDecoder` performs full supported PNG/JPEG decode before import success. Canonical images own RGBA8 pixels and row stride. The D3D12 renderer no longer invokes WIC or hides decode failure. `corrupt_entropy_png.gltf` and `corrupt_entropy_jpeg.gltf` pass superficial container/marker inspection but are rejected by the real decoder as `invalid_image`.
+
+### F-04 — resource accounting: CLOSED
+
+Checked cumulative retained and conservative-peak budgets cover source, buffers, encoded images, canonical vertices/indices, decoded pixels, and decode/accessor scratch estimates. Boundary-equal and one-byte-over tests assert `resource_budget_exceeded` without large committed files.
+
+### F-05 — silent normalization: CLOSED
+
+Non-finite/zero/grossly non-unit normals, tangent XYZ, and quaternions are rejected. Small deviations are normalized only within documented tolerance and emit `attribute_normalized` or `rotation_normalized`. Tangent `w` is preserved and validated.
+
+### F-06 — tangent usability: CLOSED IN SOURCE; WINDOWS EVIDENCE BLOCKED
+
+`--diagnostic tangents` reaches parser, renderer, and HLSL; tangent direction and signed handedness are encoded. Portable tests prove source values, draw preparation, and CLI. Exact updated GPU execution remains blocked.
+
+### F-07 — multiple instances: CLOSED IN SOURCE; WINDOWS EVIDENCE BLOCKED
+
+`instanced_tangents.gltf` stores one mesh/primitive referenced by two nodes with distinct transforms and one negative determinant. Draw count, shared primitive ID, matrices, handedness, and world bounds are asserted. Updated visual run remains blocked.
+
+### F-08 — lifetime and DirectX closure: IMPLEMENTED; EXECUTION BLOCKED
+
+`--stress-reloads`, `--stress-alternate-asset`, and `--stress-resize` exercise real scene destruction/recreation, uploads, descriptors, fences, and swap-chain resize events. `--report-live-objects` reports DXGI objects after application graphics resources are released. No Windows execution is claimed by this agent.
+
+### F-09 — stale evidence: CLOSED
+
+Documentation preserves chronology: original WARP failure, debugger location, isolation matrix, `-Od` root trigger, `-Zi -O3` repair, reduced unoptimized-shader debugging fidelity, historical developer-supplied Windows runs, and current blocked exact-snapshot checks. The intervention is recorded as human-guided Level 3.
+
+### F-10 — deterministic packaging: CLOSED
+
+The canonical Python packager enumerates files in UTF-8 lexical order, rejects prohibited paths, creates entries explicitly under `Project-Daedalus/`, fixes every timestamp to 2000-01-01 UTC, strips extra/comment metadata, and verifies CRC/order/root/timestamps. Delivery packaging was independently generated twice with identical bytes, extracted, built, tested, and scanned. The PowerShell companion implements the same policy but was source-reviewed rather than executed here.
+
+## Hostile checks performed
+
+- searched canonical headers for D3D12/DXGI/COM/WIC/importer leakage;
+- searched renderer for JSON/glTF parser objects and renderer-time image decode;
+- searched omitted-material assignments and UV0-only sampling;
+- exercised real corrupt image entropy and all invalid fixtures under GNU, Clang, and ASan/UBSan builds;
+- exercised cumulative/peak boundary limits and overflow-safe arithmetic paths;
+- inspected normalization decisions and diagnostic ordering;
+- proved one mesh creates two node-instance draws;
+- inspected upload heap/fence and renderer replacement ownership;
+- searched for `-Od`, broad debug-message suppression, silent WARP fallback, local absolute paths, and prohibited archive artifacts;
+- regenerated fixtures twice and compared hashes;
+- generated the final ZIP twice and compared hashes;
+- extracted and revalidated the archive portably.
+
+## Remaining limitations and blockers
+
+Portable PNG/JPEG decoding uses separately installed libpng/libjpeg-turbo rather than vendored byte-pinned decoder source; exact versions used by this delivery environment are recorded in `THIRD_PARTY_NOTICES.md`. The exact final archive still needs Windows VS2022/VS2026 build/test as available, hardware/WARP diagnostic runs, automated stress execution, interactive camera checks, debugger/live-object inspection, and hosted CI. These are not converted into PASS by source review.

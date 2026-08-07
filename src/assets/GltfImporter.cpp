@@ -1,5 +1,7 @@
 #include "assets/GltfImporter.h"
 
+#include "assets/ImageDecoder.h"
+
 #include "core/Json.h"
 #include "core/Sha256.h"
 
@@ -309,6 +311,69 @@ void add_information(std::vector<Diagnostic>& diagnostics,
     return left * right;
 }
 
+class ResourceBudget final
+{
+public:
+    ResourceBudget(const ImportSettings& settings, ResourceUsage& usage)
+        : retained_limit_(settings.maximum_total_decoded_bytes), peak_limit_(settings.maximum_peak_bytes), usage_(usage)
+    {
+    }
+
+    void add_source(std::uint64_t bytes, std::string_view location) { add(bytes, usage_.source_payload_bytes, "source_payload", location); }
+    void add_buffer(std::uint64_t bytes, std::string_view location) { add(bytes, usage_.buffer_payload_bytes, "buffer_payload", location); }
+    void add_encoded_image(std::uint64_t bytes, std::string_view location) { add(bytes, usage_.encoded_image_bytes, "encoded_image", location); }
+    void add_geometry(std::uint64_t bytes, std::string_view location) { add(bytes, usage_.canonical_geometry_bytes, "canonical_geometry", location); }
+    void add_decoded_image(std::uint64_t bytes, std::string_view location) { add(bytes, usage_.decoded_image_bytes, "decoded_image", location); }
+
+    void preflight_retain(std::uint64_t bytes, std::string_view category, std::string_view location) const
+    {
+        const std::uint64_t candidate = checked_add(usage_.retained_bytes, bytes, location);
+        if (candidate > retained_limit_)
+            fail(ImportStatus::resource_limit, DiagnosticCode::resource_budget_exceeded,
+                 std::string(location), "cumulative retained resource budget would be exceeded before allocation",
+                 std::string(category) + " cumulative <= " + std::to_string(retained_limit_),
+                 std::to_string(candidate));
+        if (candidate > peak_limit_)
+            fail(ImportStatus::resource_limit, DiagnosticCode::resource_budget_exceeded,
+                 std::string(location), "conservative peak resource budget would be exceeded before allocation",
+                 std::string(category) + " peak <= " + std::to_string(peak_limit_),
+                 std::to_string(candidate));
+    }
+
+    void observe_scratch(std::uint64_t bytes, std::string_view category, std::string_view location)
+    {
+        const std::uint64_t candidate = checked_add(usage_.retained_bytes, bytes, location);
+        usage_.conservative_peak_bytes = std::max(usage_.conservative_peak_bytes, candidate);
+        if (candidate > peak_limit_)
+            fail(ImportStatus::resource_limit, DiagnosticCode::resource_budget_exceeded,
+                 std::string(location), "conservative peak resource budget exceeded",
+                 std::string(category) + " <= " + std::to_string(peak_limit_), std::to_string(candidate));
+    }
+
+private:
+    void add(std::uint64_t bytes, std::uint64_t& category_counter, std::string_view category, std::string_view location)
+    {
+        preflight_retain(bytes, category, location);
+        category_counter = checked_add(category_counter, bytes, location);
+        usage_.retained_bytes = checked_add(usage_.retained_bytes, bytes, location);
+        usage_.conservative_peak_bytes = std::max(usage_.conservative_peak_bytes, usage_.retained_bytes);
+        if (usage_.retained_bytes > retained_limit_)
+            fail(ImportStatus::resource_limit, DiagnosticCode::resource_budget_exceeded,
+                 std::string(location), "cumulative retained resource budget exceeded",
+                 std::string(category) + " cumulative <= " + std::to_string(retained_limit_),
+                 std::to_string(usage_.retained_bytes));
+        if (usage_.conservative_peak_bytes > peak_limit_)
+            fail(ImportStatus::resource_limit, DiagnosticCode::resource_budget_exceeded,
+                 std::string(location), "conservative peak resource budget exceeded",
+                 std::string(category) + " peak <= " + std::to_string(peak_limit_),
+                 std::to_string(usage_.conservative_peak_bytes));
+    }
+
+    std::uint64_t retained_limit_ = 0;
+    std::uint64_t peak_limit_ = 0;
+    ResourceUsage& usage_;
+};
+
 [[nodiscard]] int base64_value(char character) noexcept
 {
     if (character >= 'A' && character <= 'Z') return character - 'A';
@@ -405,23 +470,86 @@ struct DataUri
     std::vector<std::byte> bytes;
 };
 
-[[nodiscard]] std::optional<DataUri> parse_data_uri(std::string_view uri, std::string_view location)
+struct DataUriParts
+{
+    std::string_view metadata;
+    std::string_view payload;
+    bool base64 = false;
+};
+
+[[nodiscard]] std::optional<DataUriParts> split_data_uri(std::string_view uri, std::string_view location)
 {
     if (!uri.starts_with("data:")) return std::nullopt;
     const std::size_t comma = uri.find(',');
     if (comma == std::string_view::npos)
         fail(ImportStatus::invalid_source, DiagnosticCode::malformed_json, std::string(location), "data URI is missing a comma");
     const std::string_view metadata = uri.substr(5, comma - 5);
-    const std::string_view payload = uri.substr(comma + 1);
-    const bool base64 = metadata.ends_with(";base64");
-    std::string mime(metadata.substr(0, base64 ? metadata.size() - 7 : metadata.size()));
+    return DataUriParts{metadata, uri.substr(comma + 1), metadata.ends_with(";base64")};
+}
+
+[[nodiscard]] std::uint64_t data_uri_decoded_size(std::string_view uri, std::string_view location)
+{
+    const std::optional<DataUriParts> parts = split_data_uri(uri, location);
+    if (!parts.has_value()) return 0;
+    if (parts->base64)
+    {
+        std::uint64_t compact_size = 0;
+        char previous = '\0';
+        char last = '\0';
+        for (const char character : parts->payload)
+        {
+            if (character == '\r' || character == '\n' || character == ' ' || character == '\t') continue;
+            previous = last;
+            last = character;
+            compact_size = checked_add(compact_size, 1U, location);
+        }
+        if (compact_size % 4U != 0)
+            fail(ImportStatus::invalid_source, DiagnosticCode::malformed_json, std::string(location),
+                 "base64 payload length is not a multiple of four");
+        const std::uint64_t groups = compact_size / 4U;
+        const std::uint64_t padding = last == '=' ? (previous == '=' ? 2U : 1U) : 0U;
+        const std::uint64_t maximum = checked_multiply(groups, 3U, location);
+        if (padding > maximum)
+            fail(ImportStatus::invalid_source, DiagnosticCode::malformed_json, std::string(location), "invalid base64 padding");
+        return maximum - padding;
+    }
+
+    std::uint64_t decoded_size = 0;
+    for (std::size_t index = 0; index < parts->payload.size(); ++index)
+    {
+        if (parts->payload[index] == '%')
+        {
+            if (index + 2U >= parts->payload.size())
+                fail(ImportStatus::invalid_source, DiagnosticCode::malformed_json, std::string(location),
+                     "truncated percent escape in URI");
+            const int high = hex_value(parts->payload[index + 1U]);
+            const int low = hex_value(parts->payload[index + 2U]);
+            if (high < 0 || low < 0)
+                fail(ImportStatus::invalid_source, DiagnosticCode::malformed_json, std::string(location),
+                     "invalid percent escape in URI");
+            if (((high << 4) | low) == 0)
+                fail(ImportStatus::invalid_source, DiagnosticCode::unsafe_dependency_path, std::string(location),
+                     "URI contains an encoded NUL byte");
+            index += 2U;
+        }
+        decoded_size = checked_add(decoded_size, 1U, location);
+    }
+    return decoded_size;
+}
+
+[[nodiscard]] std::optional<DataUri> parse_data_uri(std::string_view uri, std::string_view location)
+{
+    const std::optional<DataUriParts> parts = split_data_uri(uri, location);
+    if (!parts.has_value()) return std::nullopt;
+    std::string mime(parts->metadata.substr(0, parts->base64 ? parts->metadata.size() - 7U : parts->metadata.size()));
     DataUri result;
     result.mime_type = std::move(mime);
-    if (base64) result.bytes = decode_base64(payload, location);
+    if (parts->base64) result.bytes = decode_base64(parts->payload, location);
     else
     {
-        const std::string decoded = percent_decode(payload, location);
-        result.bytes.assign(reinterpret_cast<const std::byte*>(decoded.data()), reinterpret_cast<const std::byte*>(decoded.data() + decoded.size()));
+        const std::string decoded = percent_decode(parts->payload, location);
+        result.bytes.assign(reinterpret_cast<const std::byte*>(decoded.data()),
+                            reinterpret_cast<const std::byte*>(decoded.data() + decoded.size()));
     }
     return result;
 }
@@ -1033,6 +1161,7 @@ std::string ImportSettings::deterministic_description() const
            << ";max_source=" << maximum_source_bytes
            << ";max_dependency=" << maximum_dependency_bytes
            << ";max_total=" << maximum_total_decoded_bytes
+           << ";max_peak=" << maximum_peak_bytes
            << ";reject_path_traversal=" << (reject_path_traversal ? "true" : "false")
            << ";sparse_accessors=false;primitive_modes=triangles;images=png,jpeg";
     return output.str();
@@ -1053,7 +1182,15 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
 
     try
     {
-        ParsedDocument document = parse_document(read_file(source, settings.maximum_source_bytes, "source"));
+        ResourceBudget budget(settings, scene.source.resource_usage);
+        const std::uint64_t source_allocation_limit = std::min({settings.maximum_source_bytes,
+                                                                settings.maximum_total_decoded_bytes,
+                                                                settings.maximum_peak_bytes});
+        ParsedDocument document = parse_document(read_file(source, source_allocation_limit, "source"));
+        budget.add_source(document.source_bytes.size(), "source");
+        if (!document.glb_binary.empty())
+            budget.observe_scratch(document.glb_binary.size(), "glb_binary_parse_scratch", "glb.binary");
+        scene.default_material.name = "glTF default material";
         scene.source.format = document.format;
         scene.source.source_sha256 = sha256_hex(std::span<const std::byte>(document.source_bytes));
         const auto& root = require_object(document.root, "json");
@@ -1086,7 +1223,6 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
                  "KHR_mesh_quantization must be listed in extensionsRequired when used");
 
         const std::filesystem::path asset_root = source.parent_path();
-        std::uint64_t total_dependency_bytes = 0;
         std::vector<BufferData> buffers;
         if (const JsonValue::Array* buffer_array = optional_array(root, "buffers", "json"); buffer_array != nullptr)
         {
@@ -1102,11 +1238,14 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
                 {
                     if (document.format != "glb" || index != 0 || document.glb_binary.empty())
                         fail(ImportStatus::missing_dependency, DiagnosticCode::missing_dependency, location + ".uri", "buffer has no URI and no matching GLB BIN chunk");
-                    buffer.bytes = document.glb_binary;
+                    budget.preflight_retain(document.glb_binary.size(), "buffer_payload", location);
+                    buffer.bytes = std::move(document.glb_binary);
                     buffer.identity = "<glb-bin>";
                 }
-                else if (const auto data_uri = parse_data_uri(uri, location + ".uri"); data_uri.has_value())
+                else if (uri.starts_with("data:"))
                 {
+                    budget.preflight_retain(data_uri_decoded_size(uri, location + ".uri"), "buffer_payload", location);
+                    const std::optional<DataUri> data_uri = parse_data_uri(uri, location + ".uri");
                     buffer.bytes = data_uri->bytes;
                     buffer.identity = "<data-uri-buffer-" + std::to_string(index) + ">";
                 }
@@ -1114,14 +1253,15 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
                 {
                     std::string relative;
                     const std::filesystem::path dependency = resolve_dependency(asset_root, uri, settings.reject_path_traversal, location + ".uri", relative);
+                    std::error_code size_error;
+                    const std::uintmax_t dependency_size = std::filesystem::file_size(dependency, size_error);
+                    if (!size_error) budget.preflight_retain(dependency_size, "buffer_payload", location);
                     buffer.bytes = read_file(dependency, settings.maximum_dependency_bytes, location + ".uri",
                                              ImportStatus::missing_dependency, DiagnosticCode::missing_dependency);
                     buffer.identity = relative;
                     scene.source.dependencies.push_back({relative, sha256_hex(std::span<const std::byte>(buffer.bytes)), buffer.bytes.size()});
                 }
-                total_dependency_bytes = checked_add(total_dependency_bytes, buffer.bytes.size(), location);
-                if (total_dependency_bytes > settings.maximum_total_decoded_bytes)
-                    fail(ImportStatus::resource_limit, DiagnosticCode::source_too_large, location, "total dependency bytes exceed configured limit");
+                budget.add_buffer(buffer.bytes.size(), location);
                 if (buffer.bytes.size() < declared_length)
                     fail(ImportStatus::invalid_source, DiagnosticCode::invalid_buffer_range, location + ".byteLength", "buffer contains fewer bytes than declared", std::to_string(declared_length), std::to_string(buffer.bytes.size()));
                 buffers.push_back(std::move(buffer));
@@ -1213,8 +1353,10 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
                     fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image, location, "image may not define both URI and bufferView");
                 if (!uri.empty())
                 {
-                    if (const auto data_uri = parse_data_uri(uri, location + ".uri"); data_uri.has_value())
+                    if (uri.starts_with("data:"))
                     {
+                        budget.preflight_retain(data_uri_decoded_size(uri, location + ".uri"), "encoded_image", location);
+                        const std::optional<DataUri> data_uri = parse_data_uri(uri, location + ".uri");
                         image.encoded_bytes = data_uri->bytes;
                         image.source_identity = "<data-uri-image-" + std::to_string(index) + ">";
                         if (image.mime_type.empty()) image.mime_type = data_uri->mime_type;
@@ -1223,6 +1365,9 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
                     {
                         std::string relative;
                         const std::filesystem::path dependency = resolve_dependency(asset_root, uri, settings.reject_path_traversal, location + ".uri", relative);
+                        std::error_code size_error;
+                        const std::uintmax_t dependency_size = std::filesystem::file_size(dependency, size_error);
+                        if (!size_error) budget.preflight_retain(dependency_size, "encoded_image", location);
                         image.encoded_bytes = read_file(dependency, settings.maximum_dependency_bytes, location + ".uri",
                                                          ImportStatus::missing_dependency, DiagnosticCode::missing_dependency);
                         image.source_identity = relative;
@@ -1234,6 +1379,7 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
                     if (*view_index >= views.size())
                         fail(ImportStatus::invalid_source, DiagnosticCode::invalid_reference, location + ".bufferView", "image references an invalid bufferView");
                     const BufferViewData& view = views[static_cast<std::size_t>(*view_index)];
+                    budget.preflight_retain(view.length, "encoded_image", location);
                     const auto& buffer = buffers[view.buffer].bytes;
                     image.encoded_bytes.assign(buffer.begin() + static_cast<std::ptrdiff_t>(view.offset),
                                                buffer.begin() + static_cast<std::ptrdiff_t>(view.offset + view.length));
@@ -1246,6 +1392,7 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
                     fail(ImportStatus::missing_dependency, DiagnosticCode::missing_dependency, location, "image has neither URI nor bufferView");
                 }
                 std::string detected;
+                budget.add_encoded_image(image.encoded_bytes.size(), location);
                 const auto metadata = parse_image_metadata(image.encoded_bytes, image.mime_type, location, detected);
                 if (!image.mime_type.empty() && image.mime_type != detected)
                     fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image, location + ".mimeType", "declared MIME type does not match image bytes", detected, image.mime_type);
@@ -1253,6 +1400,24 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
                 image.width = std::get<0>(metadata);
                 image.height = std::get<1>(metadata);
                 image.components = std::get<2>(metadata);
+                const std::uint64_t decoded_bytes = checked_multiply(
+                    checked_multiply(image.width, image.height, location + ".decoded"), 4U, location + ".decoded");
+                budget.add_decoded_image(decoded_bytes, location + ".decoded");
+                budget.observe_scratch(decoded_bytes, "image_decode_transient", location + ".decoded");
+                try
+                {
+                    DecodedImage decoded = decode_image_rgba8(image.encoded_bytes, image.mime_type);
+                    if (decoded.width != image.width || decoded.height != image.height || decoded.rgba8.size() != decoded_bytes)
+                        fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image, location,
+                             "full image decoder dimensions disagree with structural metadata");
+                    image.row_stride = decoded.row_stride;
+                    image.decoded_rgba8 = std::move(decoded.rgba8);
+                }
+                catch (const ImageDecodeError& error)
+                {
+                    fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image, location,
+                         "supported image failed full pixel decoding", "decodable PNG or JPEG", error.what());
+                }
                 scene.images.push_back(std::move(image));
             }
         }
@@ -1341,7 +1506,6 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
                 else if (used_as_srgb[index]) scene.textures[index].color_space = ColorSpaceIntent::srgb;
             }
         }
-        if (scene.materials.empty()) scene.materials.emplace_back();
 
         if (const JsonValue::Array* camera_array = optional_array(root, "cameras", "json"); camera_array != nullptr)
         {
@@ -1450,12 +1614,18 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
                     if (position_accessor >= accessors.size())
                         fail(ImportStatus::invalid_source, DiagnosticCode::invalid_reference, location + ".attributes.POSITION", "POSITION accessor index is out of range");
                     validate_mesh_attribute_accessor(accessors[position_accessor], "POSITION", mesh_quantization_enabled, location + ".attributes.POSITION");
+                    budget.observe_scratch(checked_multiply(accessors[position_accessor].count, 3U * sizeof(float), location + ".POSITION"),
+                                           "accessor_decode_scratch", location + ".POSITION");
                     const std::vector<float> positions = reader.read_floats(position_accessor, 3, location + ".POSITION");
                     const std::size_t vertex_count = positions.size() / 3U;
                     if (vertex_count == 0)
                         fail(ImportStatus::invalid_source, DiagnosticCode::empty_primitive, location, "primitive has no vertices");
                     Primitive primitive;
                     primitive.name = (mesh.name.empty() ? "mesh" + std::to_string(mesh_index) : mesh.name) + "/primitive" + std::to_string(primitive_index);
+                    const std::uint64_t vertex_bytes = checked_multiply(vertex_count, sizeof(Vertex), location + ".vertices");
+                    budget.add_geometry(vertex_bytes, location + ".vertices");
+                    budget.observe_scratch(checked_multiply(accessors[position_accessor].count, 3U * sizeof(float), location + ".POSITION"),
+                                           "position_decode_transient", location + ".POSITION");
                     primitive.vertices.resize(vertex_count);
                     Aabb decoded_position_bounds;
                     for (std::size_t index = 0; index < vertex_count; ++index)
@@ -1505,20 +1675,51 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
                     {
                         const auto accessor_index = attribute_index(name);
                         if (!accessor_index.has_value()) return;
+                        budget.observe_scratch(checked_multiply(accessors[*accessor_index].count,
+                                                                  checked_multiply(components, sizeof(float), location), location),
+                                               "accessor_decode_scratch", location + "." + std::string(name));
                         const std::vector<float> values = reader.read_floats(*accessor_index, components, location + "." + std::string(name));
                         if (values.size() / components != vertex_count)
                             fail(ImportStatus::invalid_source, DiagnosticCode::invalid_accessor, location + "." + std::string(name), "attribute count does not match POSITION count");
                         for (std::size_t index = 0; index < vertex_count; ++index) assign(primitive.vertices[index], values.data() + index * components);
                         flag = true;
                     };
-                    read_attribute("NORMAL", 3, [](Vertex& vertex, const float* value)
+                    read_attribute("NORMAL", 3, [&](Vertex& vertex, const float* value)
                     {
-                        vertex.normal = normalize({value[0], value[1], value[2]});
+                        const Vec3 source_value{value[0], value[1], value[2]};
+                        const float magnitude = length(source_value);
+                        if (!(magnitude > 1.0e-8F) || !std::isfinite(magnitude))
+                            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_unit_vector,
+                                 location + ".NORMAL", "normal must have finite non-zero length");
+                        const float deviation = std::abs(magnitude - 1.0F);
+                        if (deviation > 1.0e-2F)
+                            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_unit_vector,
+                                 location + ".NORMAL", "normal length is too far from unit length to repair",
+                                 "length within 0.01 of 1", std::to_string(magnitude));
+                        vertex.normal = source_value / magnitude;
+                        if (deviation > 1.0e-5F)
+                            add_warning(diagnostics, DiagnosticCode::attribute_normalized, DiagnosticDisposition::repaired,
+                                        location + ".NORMAL", "slightly non-unit normal was normalized",
+                                        "unit length", std::to_string(magnitude));
                     }, primitive.has_normals);
-                    read_attribute("TANGENT", 4, [](Vertex& vertex, const float* value)
+                    read_attribute("TANGENT", 4, [&](Vertex& vertex, const float* value)
                     {
-                        const Vec3 tangent = normalize({value[0], value[1], value[2]}, {1.0F, 0.0F, 0.0F});
+                        const Vec3 source_value{value[0], value[1], value[2]};
+                        const float magnitude = length(source_value);
+                        if (!(magnitude > 1.0e-8F) || !std::isfinite(magnitude))
+                            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_unit_vector,
+                                 location + ".TANGENT", "tangent XYZ must have finite non-zero length");
+                        const float deviation = std::abs(magnitude - 1.0F);
+                        if (deviation > 1.0e-2F)
+                            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_unit_vector,
+                                 location + ".TANGENT", "tangent length is too far from unit length to repair",
+                                 "length within 0.01 of 1", std::to_string(magnitude));
+                        const Vec3 tangent = source_value / magnitude;
                         vertex.tangent = {tangent.x, tangent.y, tangent.z, value[3]};
+                        if (deviation > 1.0e-5F)
+                            add_warning(diagnostics, DiagnosticCode::attribute_normalized, DiagnosticDisposition::repaired,
+                                        location + ".TANGENT", "slightly non-unit tangent was normalized while preserving handedness",
+                                        "unit XYZ length", std::to_string(magnitude));
                     }, primitive.has_tangents);
                     read_attribute("TEXCOORD_0", 2, [](Vertex& vertex, const float* value) { vertex.texcoord0 = {value[0], value[1]}; }, primitive.has_texcoord0);
                     read_attribute("TEXCOORD_1", 2, [](Vertex& vertex, const float* value) { vertex.texcoord1 = {value[0], value[1]}; }, primitive.has_texcoord1);
@@ -1553,9 +1754,16 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
                         add_warning(diagnostics, DiagnosticCode::missing_optional_attribute, DiagnosticDisposition::defaulted, location + ".attributes.TANGENT", "missing tangents were defaulted to +X with positive handedness");
 
                     if (const auto indices = optional_uint(object, "indices", location); indices.has_value())
+                    {
+                        if (*indices >= accessors.size())
+                            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_reference, location + ".indices", "index accessor is out of range");
+                        budget.add_geometry(checked_multiply(accessors[static_cast<std::size_t>(*indices)].count,
+                                                             sizeof(std::uint32_t), location + ".indices"), location + ".indices");
                         primitive.indices = reader.read_indices(static_cast<std::size_t>(*indices), location + ".indices");
+                    }
                     else
                     {
+                        budget.add_geometry(checked_multiply(vertex_count, sizeof(std::uint32_t), location + ".indices"), location + ".indices");
                         primitive.indices.resize(vertex_count);
                         for (std::size_t index = 0; index < vertex_count; ++index) primitive.indices[index] = static_cast<std::uint32_t>(index);
                         add_warning(diagnostics, DiagnosticCode::invalid_accessor, DiagnosticDisposition::converted, location + ".indices", "non-indexed primitive was converted to explicit sequential indices");
@@ -1586,7 +1794,23 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
                             fail(ImportStatus::invalid_source, DiagnosticCode::invalid_reference, location + ".material", "material index is out of range");
                         primitive.material = MaterialId(static_cast<std::uint32_t>(*material));
                     }
-                    else primitive.material = MaterialId(0);
+                    // An invalid MaterialId means the glTF-specified default material. Source material indices remain stable.
+                    const Material& resolved_material = primitive.material.valid() ? scene.materials[primitive.material.value()] : scene.default_material;
+                    const auto validate_texcoord = [&](const std::optional<TextureReference>& reference, std::string_view slot)
+                    {
+                        if (!reference.has_value()) return;
+                        const bool available = reference->texcoord_set == 0U ? primitive.has_texcoord0 : primitive.has_texcoord1;
+                        if (!available)
+                            fail(ImportStatus::invalid_source, DiagnosticCode::missing_texture_coordinate,
+                                 location + ".material." + std::string(slot),
+                                 "material texture references a TEXCOORD set absent from the primitive",
+                                 "TEXCOORD_" + std::to_string(reference->texcoord_set), "missing");
+                    };
+                    validate_texcoord(resolved_material.base_color_texture, "baseColorTexture");
+                    validate_texcoord(resolved_material.metallic_roughness_texture, "metallicRoughnessTexture");
+                    validate_texcoord(resolved_material.normal_texture, "normalTexture");
+                    validate_texcoord(resolved_material.occlusion_texture, "occlusionTexture");
+                    validate_texcoord(resolved_material.emissive_texture, "emissiveTexture");
                     scene.primitives.push_back(std::move(primitive));
                     mesh.primitives.push_back(PrimitiveId(static_cast<std::uint32_t>(scene.primitives.size() - 1)));
                 }
@@ -1621,7 +1845,20 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
                     if (const auto iterator = object.find("rotation"); iterator != object.end())
                     {
                         const Vec4 rotation = read_vec4(iterator->second, location + ".rotation");
-                        node.rotation = {rotation.x, rotation.y, rotation.z, rotation.w};
+                        const float magnitude = std::sqrt(rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z + rotation.w * rotation.w);
+                        if (!(magnitude > 1.0e-8F) || !std::isfinite(magnitude))
+                            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_unit_vector,
+                                 location + ".rotation", "rotation quaternion must have finite non-zero length");
+                        const float deviation = std::abs(magnitude - 1.0F);
+                        if (deviation > 1.0e-2F)
+                            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_unit_vector,
+                                 location + ".rotation", "rotation quaternion is too far from unit length to repair",
+                                 "length within 0.01 of 1", std::to_string(magnitude));
+                        node.rotation = {rotation.x / magnitude, rotation.y / magnitude, rotation.z / magnitude, rotation.w / magnitude};
+                        if (deviation > 1.0e-5F)
+                            add_warning(diagnostics, DiagnosticCode::rotation_normalized, DiagnosticDisposition::repaired,
+                                        location + ".rotation", "slightly non-unit rotation quaternion was normalized",
+                                        "unit length", std::to_string(magnitude));
                     }
                     if (const auto iterator = object.find("scale"); iterator != object.end()) node.scale = read_vec3(iterator->second, location + ".scale");
                     node.local_transform = compose_trs(node.translation, node.rotation, node.scale);

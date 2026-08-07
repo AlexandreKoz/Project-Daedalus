@@ -175,9 +175,11 @@ struct Image
     std::string source_identity;
     std::string mime_type;
     std::vector<std::byte> encoded_bytes;
+    std::vector<std::byte> decoded_rgba8;
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     std::uint32_t components = 4;
+    std::uint64_t row_stride = 0;
 };
 
 struct Texture
@@ -238,6 +240,17 @@ struct DependencyRecord
     std::uint64_t byte_size = 0;
 };
 
+struct ResourceUsage
+{
+    std::uint64_t source_payload_bytes = 0;
+    std::uint64_t buffer_payload_bytes = 0;
+    std::uint64_t encoded_image_bytes = 0;
+    std::uint64_t canonical_geometry_bytes = 0;
+    std::uint64_t decoded_image_bytes = 0;
+    std::uint64_t retained_bytes = 0;
+    std::uint64_t conservative_peak_bytes = 0;
+};
+
 struct SourceMetadata
 {
     std::string display_name;
@@ -250,6 +263,7 @@ struct SourceMetadata
     std::vector<std::string> extensions_used;
     std::vector<std::string> extensions_required;
     std::vector<DependencyRecord> dependencies;
+    ResourceUsage resource_usage;
 };
 
 struct CanonicalScene
@@ -260,6 +274,7 @@ struct CanonicalScene
     std::vector<Mesh> meshes;
     std::vector<Primitive> primitives;
     std::vector<Material> materials;
+    Material default_material;
     std::vector<Texture> textures;
     std::vector<Image> images;
     std::vector<Sampler> samplers;

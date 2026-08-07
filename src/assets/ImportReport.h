@@ -39,6 +39,7 @@ struct ImportReport
     std::string selected_scene;
     std::string import_settings;
     ImportCounts counts;
+    ResourceUsage resource_usage;
     Aabb local_bounds;
     Aabb world_bounds;
     std::vector<DependencyRecord> dependencies;

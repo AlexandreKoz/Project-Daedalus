@@ -51,7 +51,7 @@ public:
     void wait_for_gpu();
     void execute_immediate(const std::function<void(ID3D12GraphicsCommandList*)>& record);
     [[nodiscard]] bool prepare_for_shutdown() noexcept;
-    void shutdown() noexcept;
+    void shutdown(bool report_device_live_objects = false) noexcept;
 
     [[nodiscard]] ID3D12Device* device() const noexcept;
     [[nodiscard]] std::uint32_t width() const noexcept;
@@ -62,6 +62,7 @@ public:
     [[nodiscard]] std::string feature_level_name() const;
     [[nodiscard]] bool debug_layer_enabled() const noexcept;
     [[nodiscard]] bool using_warp() const noexcept;
+    [[nodiscard]] static bool report_live_objects() noexcept;
 
 private:
     struct FrameResource

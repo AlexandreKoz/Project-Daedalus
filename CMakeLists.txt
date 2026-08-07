@@ -51,6 +51,8 @@ target_compile_features(daedalus_scene PUBLIC cxx_std_20)
 daedalus_apply_project_warnings(daedalus_scene)
 
 add_library(daedalus_rendering STATIC
+    src/rendering/DiagnosticPreparation.cpp
+    src/rendering/DiagnosticPreparation.h
     src/rendering/OrbitCamera.cpp
     src/rendering/OrbitCamera.h)
 target_link_libraries(daedalus_rendering PUBLIC daedalus_scene)
@@ -63,9 +65,18 @@ add_library(daedalus_assets STATIC
     src/assets/Diagnostics.h
     src/assets/GltfImporter.cpp
     src/assets/GltfImporter.h
+    src/assets/ImageDecoder.cpp
+    src/assets/ImageDecoder.h
     src/assets/ImportReport.cpp
     src/assets/ImportReport.h)
 target_link_libraries(daedalus_assets PUBLIC daedalus_core daedalus_scene)
+if(WIN32)
+    target_link_libraries(daedalus_assets PRIVATE windowscodecs ole32)
+else()
+    find_package(PNG REQUIRED)
+    find_package(JPEG REQUIRED)
+    target_link_libraries(daedalus_assets PRIVATE PNG::PNG JPEG::JPEG)
+endif()
 target_include_directories(daedalus_assets PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(daedalus_assets PUBLIC cxx_std_20)
 daedalus_apply_project_warnings(daedalus_assets)
@@ -107,13 +118,11 @@ if(DAEDALUS_BUILD_APP)
         src/graphics/D3D12Context.h
         src/graphics/DiagnosticSceneRenderer.cpp
         src/graphics/DiagnosticSceneRenderer.h
-        src/graphics/WicImageDecoder.cpp
-        src/graphics/WicImageDecoder.h
         src/platform/UniqueWin32Handle.h
         src/platform/Win32Window.cpp
         src/platform/Win32Window.h)
 
-    target_link_libraries(Daedalus PRIVATE daedalus_core daedalus_scene daedalus_assets daedalus_rendering d3d12 dxgi user32 windowscodecs ole32)
+    target_link_libraries(Daedalus PRIVATE daedalus_core daedalus_scene daedalus_assets daedalus_rendering d3d12 dxgi dxguid user32 ole32)
     target_include_directories(Daedalus PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_definitions(Daedalus PRIVATE
         WIN32_LEAN_AND_MEAN

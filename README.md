@@ -1,142 +1,140 @@
 # Project Daedalus
 
-Project Daedalus is an AI-assisted C++20 rendering laboratory and reference asset viewer. This snapshot implements the portable and source-level portions of **Campaign B: Canonical Asset Pipeline** while preserving the Campaign A Win32/Direct3D 12 ownership model.
+Project Daedalus is an AI-assisted C++20 rendering laboratory and reference asset viewer. This source snapshot closes the audited semantic and evidence defects in **Campaign B: Canonical Asset Pipeline** without beginning Campaign C.
 
-The canonical scene and importer are the Campaign B product. They compile without Windows or a GPU. The Windows viewer consumes only canonical scene data, stages immutable geometry and decoded textures into default-heap resources, and renders diagnostic shaded, normal, UV, and bounds views. It is not a Campaign C PBR renderer.
+The Campaign B product is the portable canonical scene plus the strict glTF/GLB importer. The Windows application consumes that canonical representation, uploads immutable geometry and validated RGBA8 images through explicit D3D12 staging, and renders diagnostic views. It does not claim production PBR.
 
-## Campaign status
+## Audit-closure status
 
-Portable Campaign B implementation and validation are complete on this snapshot: GNU and Clang builds, CPU tests, fixture imports, malformed-input checks, deterministic-report checks, and clean archive revalidation pass. Windows/D3D12 compilation, shader execution, hardware/WARP smoke tests, interactive orbit/resize/reload checks, and debug-layer inspection were unavailable in the delivery environment and remain **BLOCKED** or **NOT RUN**. Campaign A's exact closure snapshot also still lacks its required Windows revalidation, so Campaign B is not declared finally accepted. See `docs/campaigns/campaign-b-acceptance.md`.
+The remediation snapshot closes the source-level findings F-01 through F-10 from the 2026-08-02 adversarial audit:
+
+- omitted primitive materials now use an explicit canonical glTF default material sentinel without shifting source material indices;
+- `textureInfo.texCoord` 0/1 is validated and reaches runtime draw preparation and HLSL selection;
+- supported PNG/JPEG images are fully decoded before import success, producing owned RGBA8 canonical pixels;
+- retained and conservative-peak resource budgets cover source, buffers, encoded images, canonical geometry, decoded images, and decode scratch;
+- slightly non-unit normals, tangents, and quaternions are reported repairs; zero or grossly invalid values are rejected;
+- `--diagnostic tangents` visualizes tangent direction and handedness;
+- controlled fixtures prove default materials, UV1, one-mesh/multiple-node instances, negative scale, decode failure, budgets, and vector repair/rejection;
+- focused runtime stress and post-teardown DXGI live-object reporting options are implemented;
+- evidence documents preserve the original Debug WARP `-Od` crash and the validated `-Zi -O3` policy;
+- source packaging explicitly sorts entries, fixes timestamps, enforces one `Project-Daedalus/` root, and rejects prohibited artifacts.
+
+Portable Debug and Release builds, all portable tests, the expanded controlled corpus, deterministic reports, fixture regeneration, and final archive re-extraction are validated in the delivery environment. Updated Windows/D3D12 runtime behavior is **not inferred** from portable validation: exact-final-snapshot Windows tests remain `NOT RUN` here and commands are documented for the developer.
 
 ## Architecture
 
 ```text
 core
   ↑
-scene          canonical CPU-only types and math
+scene          API-independent canonical types and math
   ↑
-assets         glTF/GLB parse, validation, normalization, reports
+assets         glTF/GLB parsing, full image decode, validation, budgets, reports
   ↑
-rendering      orbit-camera policy
+rendering      renderer-neutral draw preparation and orbit camera
   ↑
 graphics       D3D12 staging, descriptors, depth, diagnostics
   ↑
-Application    reference viewer lifecycle and command line
+Application    reference viewer lifecycle, stress orchestration, command line
 ```
 
-Rules enforced by source organization and tests:
+Rules:
 
 - `src/scene` contains no D3D12, DXGI, COM, WIC, or importer-private type.
-- The importer returns owned canonical arrays and strings; parser DOM and temporary buffers do not escape.
-- The renderer consumes `CanonicalScene`, not JSON or glTF object graphs.
-- GPU resources are not stored in the canonical scene.
-- The application owns the window, device context, importer result, and renderer lifecycle.
+- Import results own all strings, geometry, encoded bytes, and decoded RGBA8 pixels.
+- The renderer consumes `CanonicalScene`; parser/JSON objects do not escape the importer.
+- GPU resources are absent from canonical structures.
+- An invalid `MaterialId` on a primitive means the glTF default material; source material indices remain unchanged.
+- Full image decode validity belongs to the assets layer, not to renderer construction.
 
-## Supported Campaign B subset
+## Supported subset
 
-- `.gltf` JSON and `.glb` 2.0 containers.
+- glTF 2.0 `.gltf` and `.glb`.
 - External, data-URI, and GLB buffers.
-- External, data-URI, and buffer-view PNG/JPEG image payloads; portable validation checks PNG chunk/CRC structure or JPEG marker/frame/scan structure and records source dimensions/components, while the Windows runtime decodes through WIC.
-- Multiple scenes, roots, nodes, meshes, and triangle primitives.
-- Matrix or TRS nodes, hierarchy propagation, negative scale, and recomputed bounds.
-- Float and normalized integer vertex attributes, interleaved accessors, VEC3/VEC4 colours, 8/16/32-bit indices, and declared `KHR_mesh_quantization`.
-- Positions, normals, tangents, `TEXCOORD_0/1`, and `COLOR_0` in the declared subset.
-- Metallic-roughness material metadata, texture references, sampler modes, perspective/orthographic cameras, and `KHR_lights_punctual` metadata.
-- Deterministic JSON import reports and content/settings/dependency-based asset keys.
+- External, data-URI, and buffer-view PNG/JPEG images.
+- Full PNG/JPEG decode to top-left-origin, tightly packed RGBA8 before import success.
+- Multiple scenes, roots, nodes, meshes, primitives, and node instances of one mesh.
+- Matrix/TRS hierarchy, negative scale, deterministic world propagation and recomputed bounds.
+- Positions, normals, tangents with sign, `TEXCOORD_0/1`, colours, interleaving, normalized integer attributes, and 8/16/32-bit indices.
+- Metallic-roughness metadata, texture/sampler metadata, perspective/orthographic cameras, and declared `KHR_lights_punctual` subset.
+- Deterministic JSON reports, dependency hashes, settings-sensitive asset keys, and resource-use counters.
 
-Sparse accessors, non-triangle primitive modes, texture-transform extensions, animation, skins, morph targets, Draco/meshopt compression, KTX/Basis, production PBR, transparency rendering, and broad extension coverage are explicitly unsupported in Campaign B. The committed corpus contains 6 valid/degraded and 18 invalid top-level fixtures.
+Sparse accessors, non-triangle topology, `KHR_texture_transform`, animation, skins, morph targets, compression extensions, KTX/Basis, production transparency/PBR, IBL, shadows, DXR, and broad extension coverage are out of scope.
 
-## Portable configure, build, and test
+## Portable prerequisites
 
-Prerequisites: CMake 3.25+, Ninja, and a C++20 compiler.
+- CMake 3.25+
+- Ninja
+- C++20 compiler
+- libpng and libjpeg development packages
 
 ```bash
 cmake --preset portable-debug
 cmake --build --preset portable-debug
-ctest --preset portable-debug
+ctest --preset portable-debug --output-on-failure
 
 cmake --preset portable-release
 cmake --build --preset portable-release
-ctest --preset portable-release
+ctest --preset portable-release --output-on-failure
 ```
 
-Equivalent direct configuration:
-
-```bash
-cmake -S . -B build/portable-debug -G Ninja \
-  -DDAEDALUS_BUILD_APP=OFF \
-  -DDAEDALUS_BUILD_TESTS=ON \
-  -DDAEDALUS_BUILD_TOOLS=ON \
-  -DDAEDALUS_WARNINGS_AS_ERRORS=ON \
-  -DCMAKE_BUILD_TYPE=Debug
-cmake --build build/portable-debug
-ctest --test-dir build/portable-debug --output-on-failure
-```
+Windows uses Windows Imaging Component behind the same `assets/ImageDecoder` contract; non-Windows portable builds use separately installed libpng/libjpeg. No image-decoder source is vendored, so the exact decoder implementations remain a documented build-environment dependency rather than part of the source ZIP.
 
 ## Asset validator
 
 ```bash
-build/portable-debug/DaedalusAssetValidator tests/assets/valid/external_scene.gltf \
-  --dump-scene --report import-report.json --expect-success
+build/portable-debug/DaedalusAssetValidator \
+  tests/assets/valid/uv1_scene.gltf --dump-scene --report report.json --expect-success
 
-build/portable-debug/DaedalusAssetValidator tests/assets/invalid/accessor_oob.gltf \
-  --expect-failure
+build/portable-debug/DaedalusAssetValidator \
+  tests/assets/invalid/corrupt_entropy_png.gltf --expect-failure
+./build/portable-debug/DaedalusAssetValidator \
+  tests/assets/invalid/corrupt_entropy_jpeg.gltf --expect-failure
 ```
 
-The validator exits `0` for a successful import, `1` for a normal rejected import, `2` for tool misuse/internal failure, and `3` when an explicit expectation is violated.
+Exit codes: `0` accepted/expected behavior, `1` normal rejected import, `2` misuse/internal tool failure, `3` expectation mismatch.
 
 ## Windows build
 
-Use Windows 11 or a compatible Windows 10/11 x64 host with Visual Studio 2022/v143 or Visual Studio 2026/v145, a recent Windows SDK, CMake, and DXC.
-
 ```powershell
-cmake --preset windows-msvc-debug
-cmake --build --preset windows-msvc-debug
-ctest --preset windows-msvc-debug
+cmake --preset windows-vs2026-debug
+cmake --build --preset windows-vs2026-debug
+ctest --preset windows-vs2026-debug --output-on-failure
 
 cmake --preset windows-vs2026-release
 cmake --build --preset windows-vs2026-release
-ctest --preset windows-vs2026-release
+ctest --preset windows-vs2026-release --output-on-failure
 ```
 
-DXC discovery accepts `-DDXC_PATH=<dxc.exe-or-directory>` or the `DXC_PATH` environment variable. Project C++ and HLSL warnings are errors in the documented presets.
+Debug diagnostic HLSL intentionally uses `-Zi -O3 -Qembed_debug`. `-Od` is not used because Windows SDK 10.0.26100 WARP reproducibly crashed inside `d3d10warp.dll` during graphics PSO creation for either unoptimized shader stage.
 
 ## Viewer command line
 
 ```text
-Daedalus.exe --asset <path.gltf|path.glb>
+Daedalus.exe [--asset <path.gltf|path.glb>]
              [--scene <index-or-name>]
              [--dump-scene]
              [--import-report <report.json>]
-             [--diagnostic shaded|normals|uv|bounds]
+             [--diagnostic shaded|normals|uv|tangents|bounds]
              [--warp]
              [--frames <positive-count>]
+             [--stress-reloads <positive-count>]
+             [--stress-alternate-asset <path>]
+             [--stress-resize]
+             [--report-live-objects]
 ```
 
-With no `--asset`, the viewer uses a canonical built-in diagnostic triangle. A requested asset that fails import terminates with structured diagnostics; it never silently falls back.
+A failed requested asset never silently falls back to the built-in triangle. Stress reloads wait for GPU idle, destroy the renderer, reload the real canonical scene, recreate uploads/descriptors, and may alternate two assets. `--stress-resize` exercises resize/minimize/restore/maximize states. `--report-live-objects` requests a Debug post-teardown DXGI report.
 
-Camera controls: left-drag orbits, right-drag pans, mouse wheel dollies, `R` reframes the selected scene bounds, and `F5` reloads the asset after a GPU-idle fence wait.
-
-## Important documents
-
-- `docs/architecture/campaign-b-architecture.md`
-- `docs/architecture/canonical-scene-schema.md`
-- `docs/assets/gltf-supported-subset.md`
-- `docs/assets/coordinate-conventions.md`
-- `docs/assets/import-report-schema.md`
-- `docs/architecture/gpu-upload-lifetime.md`
-- `docs/assets/fixture-manifest.md`
-- `docs/campaigns/campaign-b-acceptance.md`
-- `docs/campaigns/campaign-b-adversarial-audit.md`
-- `docs/handoffs/campaign-c-handoff.md`
+Camera controls: left-drag orbit, right-drag pan, wheel dolly, `R` reframe, `F5` reload.
 
 ## Source packaging
 
-After removing generated directories:
+After removing generated directories, the canonical delivery command is:
 
-```powershell
-.\scripts\clean.ps1
-.\scripts\package-source.ps1
+```bash
+python3 scripts/package-source.py --output ../Project-Daedalus-Campaign-B-audit-closure-source.zip
 ```
 
-The packaging script rejects build trees, binaries, shader bytecode, logs, runtime output, IDE state, caches, nested archives, and restricted SDK files before creating the source-only ZIP.
+The Windows companion is `scripts/package-source.ps1`. The canonical Python packaging script creates sorted entries beneath `Project-Daedalus/`, applies a fixed `2000-01-01T00:00:00Z` ZIP timestamp, and rejects build trees, binaries, DXIL/PDBs, logs, IDE state, caches, nested archives, secrets, and restricted SDK material.
+
+See `docs/campaigns/campaign-b-acceptance.md`, `docs/campaigns/campaign-b-adversarial-audit.md`, and `docs/handoffs/campaign-c-handoff.md` for exact evidence and limitations.

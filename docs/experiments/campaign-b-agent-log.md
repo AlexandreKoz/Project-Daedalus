@@ -1,57 +1,57 @@
-# Campaign B AI agent and experiment log
+# Campaign B AI-agent experiment log — audit closure
 
-## Task identity
+## Baseline
 
-- Campaign: B — Canonical Asset Pipeline.
-- Input archive SHA-256: `f79b0218c903ab4bda2d79566d35b992f9b8924933ba44aa375cc0c9557ed49d`.
-- Suggested branch/PR: `feat/campaign-b-canonical-asset-pipeline`.
-- Intervention level: Level 0 specification-only for implementation; no human root-cause repair was supplied during this task.
+- Input: `Project-Daedalus-main(3)(1).zip`
+- SHA-256: `5397703f3cba8f4649f46f1ed2844a14f82198a9888dde2b34303bdf2348da32`
+- Audit basis: Campaign B adversarial acceptance audit dated 2026-08-02.
+- Branch/PR name: `fix/campaign-b-audit-closure`.
 
-## Repository inspection
+## Preserved historical chronology
 
-The supplied archive contained a Campaign A Win32/D3D12 triangle baseline. The application owned the window and renderer; `D3D12Context` owned adapter/device/swap-chain/command/fence state; rendering recorded through `FrameRecordingContext`. Campaign A documentation explicitly separated prior Windows evidence from its modified closure snapshot and did not claim the latter fully accepted.
+1. Original Campaign B implementation passed portable tests but Windows runtime items were initially unavailable to the coding agent.
+2. Developer local VS2026 evidence later proved Debug/Release builds and hardware rendering.
+3. Debug WARP crashed with `0xC0000005` in `d3d10warp.dll` while `DiagnosticSceneRenderer::create_pipeline_states` called `CreateGraphicsPipelineState`.
+4. Human-guided isolation tested embedded/separate shader debug data, Release DXIL in the Debug executable, `-Od`, `-Zi -O3`, and mixed vertex/pixel stages.
+5. Either shader stage compiled with `-Od` reproduced the WARP crash. `-Zi -O3` passed with the D3D12 debug layer.
+6. Debug HLSL policy changed to `-Zi -O3 -Qembed_debug`. This reduces unoptimized shader-debug fidelity and is recorded as an explicit limitation.
 
-## Major decisions
+This diagnosis is a **Level-3 human intervention**: the human provided environment operation, debugger evidence, controlled experiments, and the decisive compiler-flag result. It is not counted as zero intervention and is not rewritten as autonomous success.
 
-1. Implement a project-owned strict JSON parser and bounded glTF 2.0 importer instead of vendoring a parser dependency. This keeps the archive offline and prevents parser-specific types from crossing module boundaries.
-2. Preserve glTF right-handed/CCW canonical data and isolate API-specific projection/depth handling at the graphics boundary.
-3. Store encoded PNG/JPEG bytes and portable source metadata in canonical images; perform full Windows decode through WIC only in graphics code.
-4. Use synchronous direct-queue staging for Campaign B. Auditable fence correctness was preferred over speculative streaming infrastructure.
-5. Make the validator and generated CC0 fixture corpus first-class portable acceptance paths.
-6. Replace the triangle-only path with canonical-scene rendering and remove legacy renderer/shader sources.
+## Audit-closure implementation
 
-## Implementation sequence
+- F-01: explicit glTF default-material sentinel and regression fixture.
+- F-02: UV0/UV1 validation, runtime-neutral draw preparation, draw constants, and HLSL selection.
+- F-03: full assets-layer PNG/JPEG decode and canonical RGBA8 ownership.
+- F-04: checked retained/peak resource accounting and report counters.
+- F-05: explicit unit-vector/quaternion repair/rejection diagnostics.
+- F-06: tangent diagnostic mode.
+- F-07: one-mesh/two-node instance fixture with negative scale.
+- F-08: deterministic reload/alternate-asset/resize stress options and post-teardown D3D12/DXGI reports.
+- F-09: evidence/documentation chronology repaired.
+- F-10: deterministic explicit-entry packaging.
 
-- Added core JSON and SHA-256 utilities and expanded command-line parsing.
-- Added canonical math/schema, typed handles, transform propagation, bounds, and hierarchy dump.
-- Added structured diagnostics, stable reports, deterministic identity, and glTF/GLB import.
-- Added valid/degraded/invalid fixture generation and CTest coverage.
-- Added a portable validator, GNU/Clang presets, sanitizer execution, and CI updates.
-- Added orbit camera, Win32 input, WIC decode, D3D12 staging, depth, descriptors, reload, and diagnostic shaders.
-- Rewired `Application` to import before GPU setup and reject requested-asset failures without silent fallback.
-- Added architecture, schema, subset, lifetime, controls, acceptance, audit, experiment, and handoff documentation.
+## Validation performed by this agent
 
-## Failures and repairs observed
+Environment: Linux, GNU and Clang C++20 toolchains, no Win32/D3D12 runtime.
 
-- An early normalized/data-URI test expected an implicit default material alongside an explicit material. The test was corrected to the actual canonical contract instead of distorting implementation.
-- Missing external files initially returned generic `io_failure`; dependency reads were separated into `missing_dependency` while root open failures remain `io_failure`.
-- Orbit-camera code was initially Windows-only; it was promoted to `daedalus_rendering` and tested portably.
-- Hostile review found stale-source-bounds trust gaps, permissive base64/image/URI checks, missing semantic accessor/material-range constraints, a duplicate renderer function definition, a per-frame constant-buffer race, and an illegal typed-resource/sRGB-view combination. Each was repaired before final validation.
+- Portable Debug and Release configure/build/test with warnings as errors.
+- Clang 17 Release second-compiler build.
+- GNU AddressSanitizer plus UndefinedBehaviorSanitizer Debug build and CTest run.
+- Expanded CTest: Core 9, Scene 7, Assets 17.
+- Controlled corpus: 10 valid/degraded accepted, 25 invalid rejected.
+- Fixture generator two-run identity: complete fixture-tree SHA-256 `e5af0b17b8eb46aae3a97c279c6a3c12b275905519752f76059909d5d52811d9`.
+- Deterministic report/location/dependency/settings tests.
+- Canonical Python package two-run byte identity; PowerShell companion source-reviewed only.
+- Fresh archive extraction, configure/build/test, validator corpus run, and prohibited-artifact/path scan.
 
-No failing test was disabled. No mock replaced real parsing. No Windows result was inferred.
+## Honest unavailable evidence
 
-## Validation metrics
+- Updated exact-snapshot Windows compiler and HLSL build.
+- Hardware and WARP rendering after image/UV/tangent changes.
+- Interactive camera behavior.
+- Runtime stress execution.
+- DXGI live-object debugger output.
+- Hosted CI run.
 
-- Portable compiler/configuration combinations: 4 (GNU Debug/Release and Clang Debug/Release), warnings as errors.
-- Sanitizer configuration: Clang Debug with AddressSanitizer and UndefinedBehaviorSanitizer.
-- CTest executions before packaging: 5; each reported 3/3 executables passed.
-- Controlled top-level assets: 6 valid/degraded and 18 invalid.
-- Fixture regeneration comparisons: 1; byte-identical.
-- Determinism roots before packaging: 2; byte-identical report SHA-256 `3da68544ed48beeb7198e9a7d99b67bd7219e93f89aa3864514bdf849ac1213c`.
-- Windows builds: 0, environment unavailable.
-- Runtime D3D12 runs/screenshots/debug captures: 0, environment unavailable.
-- Human Level-3 interventions: 0.
-
-## Experimental observation
-
-Explicit data contracts and machine-readable fixtures gave strong leverage over the portable importer. The highest residual uncertainty remains where the project charter predicted: explicit D3D12 resource/view contracts, shader compatibility, synchronization under live interaction, and visual correctness. Source review caught several credible GPU defects, demonstrating why compilation or a plausible screenshot alone would not have been adequate evidence.
+Those rows remain `BLOCKED` or `NOT RUN` in the acceptance matrix.

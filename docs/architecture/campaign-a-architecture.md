@@ -128,7 +128,7 @@ generated/shaders/TriangleVS.dxil
 generated/shaders/TrianglePS.dxil
 ```
 
-Both entry points come from `shaders/Triangle.hlsl` and target Shader Model 6.0. Debug uses `-Zi -Od -Qembed_debug`; other configurations use `-O3`; all shader warnings are errors. The `Daedalus` target depends on both outputs and copies them into an executable-relative `shaders` directory. HLSL is an explicit custom-command dependency, so source edits request recompilation.
+Both entry points come from project-owned HLSL and target Shader Model 6.0. The current Debug policy is `-Zi -O3 -Qembed_debug`; other configurations use `-O3`; all shader warnings are errors. Campaign A originally used `-Od`, but the Campaign B Windows investigation demonstrated that Windows SDK 10.0.26100 WARP access-violated during PSO creation when either shader stage contained unoptimized DXIL. The `Daedalus` target depends on the generated outputs and copies them into an executable-relative `shaders` directory. HLSL is an explicit custom-command dependency, so source edits request recompilation.
 
 ## Error flow
 
@@ -164,3 +164,7 @@ The following boundaries are expected to survive the next campaign with additive
 ## Decisions postponed
 
 Campaign A intentionally leaves asset formats, default-heap upload staging, descriptor allocation policy, depth conventions, camera data, material representation, PBR shader layout, resource lifetime tracking beyond swap-chain frames, render-pass scheduling, shader reflection, pipeline caching, asynchronous copy queues, multithreaded command recording, and vendor-specific reconstruction features for separately reviewed campaigns.
+
+## Campaign B audit-closure amendment (2026-08-07)
+
+Campaign A's D3D12 ownership direction remains unchanged. Campaign B adds validated decoded image ownership to the assets layer and renderer-neutral `DiagnosticPreparation`; neither alters application/window/context ownership. Debug HLSL no longer uses `-Od`. Local Windows 11 / VS2026 investigation on the pre-closure snapshot proved that unoptimized DXIL from either shader stage caused Windows SDK 10.0.26100 WARP to access-violate during `CreateGraphicsPipelineState`. The retained policy is `-Zi -O3 -Qembed_debug`, trading unoptimized shader stepping for a stable explicit WARP path. This chronology does not retroactively rewrite Campaign A acceptance evidence.

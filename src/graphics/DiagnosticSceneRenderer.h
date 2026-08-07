@@ -13,6 +13,7 @@
 
 #include "core/CommandLine.h"
 #include "graphics/D3D12Context.h"
+#include "rendering/DiagnosticPreparation.h"
 #include "rendering/OrbitCamera.h"
 #include "scene/Scene.h"
 
@@ -51,14 +52,9 @@ private:
         D3D12_INDEX_BUFFER_VIEW index_view{};
         std::uint32_t index_count = 0;
         MaterialId material;
-        bool has_texture_coordinates = false;
+        bool has_texcoord0 = false;
+        bool has_texcoord1 = false;
         bool has_vertex_colors = false;
-    };
-
-    struct DrawItem
-    {
-        std::uint32_t primitive_index = 0;
-        Mat4 world = identity_matrix();
     };
 
     struct alignas(16) DrawConstants
@@ -70,7 +66,10 @@ private:
         std::uint32_t diagnostic_mode = 0;
         std::uint32_t has_texture = 0;
         std::uint32_t use_vertex_color = 0;
-        std::uint32_t padding = 0;
+        std::uint32_t texture_coord_set = 0;
+        float world_handedness = 1.0F;
+        std::uint32_t padding0 = 0;
+        std::uint32_t padding1 = 0;
     };
 
     void create_root_signature();
@@ -119,7 +118,7 @@ private:
     std::size_t draw_slots_per_frame_ = 1;
 
     std::vector<GpuPrimitive> primitives_;
-    std::vector<DrawItem> draw_items_;
+    std::vector<PreparedDiagnosticDraw> draw_items_;
     std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> textures_;
     std::vector<std::uint32_t> texture_linear_srv_indices_;
     std::vector<std::uint32_t> texture_srgb_srv_indices_;

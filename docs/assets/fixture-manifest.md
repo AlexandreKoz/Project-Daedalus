@@ -17,4 +17,18 @@ Auxiliary dependencies such as `external_scene.bin`, `texture.png`, and `texture
 
 The 18 controlled failures cover malformed JSON, corrupted GLB framing, missing external buffer/image, accessor overrun, invalid stride, out-of-range indices, non-finite attributes, unsupported required extension, unsupported primitive mode, multiple-parent graph, unsupported image encoding, truncated PNG, invalid base64, network URI, path traversal, material factor outside schema range, and quantized accessors without required `KHR_mesh_quantization` declaration.
 
-`tests/assets/manifest.json` is the machine-readable top-level list: 6 valid/degraded and 18 invalid assets.
+`tests/assets/manifest.json` is the machine-readable top-level list: 10 valid/degraded and 25 invalid assets.
+
+## Audit-closure fixture expansion
+
+The corpus now contains 10 valid/degraded top-level fixtures and 25 invalid fixtures. New cases cover:
+
+- `material_default.gltf`: explicit red source material plus omitted default material;
+- `uv1_scene.gltf` / `missing_uv1.gltf`: visibly divergent UV0/UV1 and missing-set rejection;
+- `instanced_tangents.gltf`: one mesh, two transformed instances, negative determinant, tangent signs;
+- `repaired_vectors.gltf`: explicit normal/tangent/quaternion repair diagnostics;
+- `corrupt_entropy_png.gltf`: valid PNG chunk structure but undecodable pixel stream;
+- `corrupt_entropy_jpeg.gltf`: plausible JPEG marker structure but corrupt scan entropy;
+- `zero_normal.gltf`, `zero_tangent.gltf`, `zero_quaternion.gltf`: gross invalid-vector rejection.
+
+Budget boundary and cumulative multi-image behavior use these small assets with constrained `ImportSettings`; no giant malicious payload is committed.

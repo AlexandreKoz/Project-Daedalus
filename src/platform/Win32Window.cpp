@@ -90,6 +90,63 @@ void Win32Window::show(int command_show)
     UpdateWindow(window_);
 }
 
+void Win32Window::begin_stress_sequence()
+{
+    if (window_ == nullptr) throw std::runtime_error("cannot stress a destroyed window");
+    if (stress_sequence_active_) throw std::runtime_error("window stress sequence is already active");
+    stress_sequence_active_ = true;
+    stress_sequence_stage_ = 0;
+    Log::info("Runtime stress: beginning staged resize/minimize/restore/maximize sequence");
+}
+
+bool Win32Window::advance_stress_sequence()
+{
+    if (!stress_sequence_active_) return true;
+    if (window_ == nullptr) throw std::runtime_error("cannot stress a destroyed window");
+
+    BOOL succeeded = TRUE;
+    switch (stress_sequence_stage_)
+    {
+    case 0:
+        succeeded = SetWindowPos(window_, nullptr, 0, 0, 640, 360, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        Log::info("Runtime stress window stage 1/7: small resize queued");
+        break;
+    case 1:
+        ShowWindow(window_, SW_MINIMIZE);
+        Log::info("Runtime stress window stage 2/7: minimize queued");
+        break;
+    case 2:
+        ShowWindow(window_, SW_RESTORE);
+        Log::info("Runtime stress window stage 3/7: restore queued");
+        break;
+    case 3:
+        succeeded = SetWindowPos(window_, nullptr, 0, 0, 1536, 864, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        Log::info("Runtime stress window stage 4/7: large resize queued");
+        break;
+    case 4:
+        ShowWindow(window_, SW_MAXIMIZE);
+        Log::info("Runtime stress window stage 5/7: maximize queued");
+        break;
+    case 5:
+        ShowWindow(window_, SW_RESTORE);
+        Log::info("Runtime stress window stage 6/7: restore queued");
+        break;
+    case 6:
+        succeeded = SetWindowPos(window_, nullptr, 0, 0, 1280, 720, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        Log::info("Runtime stress window stage 7/7: canonical resize queued");
+        break;
+    default:
+        UpdateWindow(window_);
+        stress_sequence_active_ = false;
+        Log::info("Runtime stress: staged resize/minimize/restore/maximize sequence completed");
+        return true;
+    }
+    if (succeeded == FALSE)
+        throw std::runtime_error("Win32 window stress operation failed");
+    ++stress_sequence_stage_;
+    return false;
+}
+
 bool Win32Window::process_messages()
 {
     MSG message{};

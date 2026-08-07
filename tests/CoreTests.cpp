@@ -51,6 +51,50 @@ void test_command_line_rejections()
     require_throws<daedalus::CommandLineError>([&] { static_cast<void>(daedalus::parse_command_line(bad_mode)); }, "unknown diagnostic mode must be rejected");
 }
 
+
+void test_tangent_diagnostic_mode()
+{
+    constexpr std::array arguments{std::wstring_view(L"--diagnostic"), std::wstring_view(L"tangents")};
+    const daedalus::CommandLineOptions options = daedalus::parse_command_line(arguments);
+    require(options.diagnostic_mode == daedalus::DiagnosticMode::tangents, "tangent diagnostic mode must parse");
+    require(daedalus::to_string(options.diagnostic_mode) == "tangents", "tangent diagnostic mode must format deterministically");
+    require(daedalus::usage_text().find("tangents") != std::string::npos, "help must document tangent diagnostics");
+}
+
+void test_stress_command_line()
+{
+    constexpr std::array arguments{
+        std::wstring_view(L"--asset"), std::wstring_view(L"first.glb"),
+        std::wstring_view(L"--stress-reloads"), std::wstring_view(L"12"),
+        std::wstring_view(L"--stress-alternate-asset"), std::wstring_view(L"second.gltf"),
+        std::wstring_view(L"--stress-resize"), std::wstring_view(L"--report-live-objects")};
+    const daedalus::CommandLineOptions options = daedalus::parse_command_line(arguments);
+    require(options.stress_reload_count == 12, "stress reload count must parse");
+    require(options.stress_alternate_asset_path == std::filesystem::path(L"second.gltf"),
+            "alternate stress asset must parse");
+    require(options.stress_resize, "resize stress flag must parse");
+    require(options.report_live_objects, "live-object flag must parse");
+
+    constexpr std::array alternate_without_asset{
+        std::wstring_view(L"--stress-reloads"), std::wstring_view(L"2"),
+        std::wstring_view(L"--stress-alternate-asset"), std::wstring_view(L"second.gltf")};
+    require_throws<daedalus::CommandLineError>(
+        [&] { static_cast<void>(daedalus::parse_command_line(alternate_without_asset)); },
+        "alternate stress asset without primary asset must be rejected");
+
+    constexpr std::array alternate_without_reload{
+        std::wstring_view(L"--asset"), std::wstring_view(L"first.glb"),
+        std::wstring_view(L"--stress-alternate-asset"), std::wstring_view(L"second.gltf")};
+    require_throws<daedalus::CommandLineError>(
+        [&] { static_cast<void>(daedalus::parse_command_line(alternate_without_reload)); },
+        "alternate stress asset without reload count must be rejected");
+
+    const std::string help = daedalus::usage_text();
+    require(help.find("--stress-reloads") != std::string::npos, "help must document reload stress");
+    require(help.find("--stress-resize") != std::string::npos, "help must document resize stress");
+    require(help.find("--report-live-objects") != std::string::npos, "help must document live-object reporting");
+}
+
 void test_result_formatting()
 {
     require(daedalus::format_result_code(static_cast<daedalus::ResultCode>(0x80004005U)).starts_with("0x80004005"), "result code formatting must preserve hexadecimal digits");
@@ -86,6 +130,8 @@ int main()
         {"command line defaults", test_command_line_defaults},
         {"command line values", test_command_line_values},
         {"command line rejections", test_command_line_rejections},
+        {"tangent diagnostic mode", test_tangent_diagnostic_mode},
+        {"stress command line", test_stress_command_line},
         {"result formatting", test_result_formatting},
         {"adapter policy", test_adapter_policy},
         {"JSON parser", test_json_parser_and_stable_serialization},

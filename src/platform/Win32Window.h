@@ -30,6 +30,8 @@ public:
     Win32Window& operator=(Win32Window&&) = delete;
 
     void show(int command_show);
+    void begin_stress_sequence();
+    [[nodiscard]] bool advance_stress_sequence();
     [[nodiscard]] bool process_messages();
     [[nodiscard]] std::optional<std::pair<std::uint32_t, std::uint32_t>> consume_resize();
     [[nodiscard]] OrbitInput consume_orbit_input() noexcept;
@@ -59,5 +61,7 @@ private:
     POINT last_mouse_{};
     OrbitInput orbit_input_{};
     bool reload_requested_ = false;
+    bool stress_sequence_active_ = false;
+    std::uint32_t stress_sequence_stage_ = 0;
 };
 }

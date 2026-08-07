@@ -1,5 +1,8 @@
 #include "graphics/D3D12Context.h"
 
+#include <d3d12sdklayers.h>
+#include <dxgidebug.h>
+
 #include "core/Error.h"
 #include "core/Log.h"
 #include "graphics/AdapterPolicy.h"
@@ -198,7 +201,7 @@ bool D3D12Context::prepare_for_shutdown() noexcept
     return false;
 }
 
-void D3D12Context::shutdown() noexcept
+void D3D12Context::shutdown(bool report_device_live_objects) noexcept
 {
     if (shutdown_complete_)
     {
@@ -227,6 +230,33 @@ void D3D12Context::shutdown() noexcept
     command_queue_.Reset();
     fence_.Reset();
     fence_event_.reset();
+
+#if defined(DAEDALUS_DEBUG_BUILD)
+    if (report_device_live_objects && device_ != nullptr)
+    {
+        Log::info("D3D12 device live-object report begin (child resources released)");
+        Microsoft::WRL::ComPtr<ID3D12DebugDevice> debug_device;
+        const HRESULT query = device_.As(&debug_device);
+        if (SUCCEEDED(query))
+        {
+            const HRESULT report = debug_device->ReportLiveDeviceObjects(
+                static_cast<D3D12_RLDO_FLAGS>(D3D12_RLDO_DETAIL | D3D12_RLDO_IGNORE_INTERNAL));
+            if (FAILED(report))
+                Log::error(format_failure_message(static_cast<ResultCode>(report),
+                                                  "ID3D12DebugDevice::ReportLiveDeviceObjects"));
+            else
+                Log::info("D3D12 device live-object report end; inspect debugger output for unexpected objects");
+        }
+        else
+        {
+            Log::warning("D3D12 device live-object report unavailable: " +
+                         format_result_code(static_cast<ResultCode>(query)));
+        }
+    }
+#else
+    static_cast<void>(report_device_live_objects);
+#endif
+
     device_.Reset();
     adapter_.Reset();
     factory_.Reset();
@@ -620,5 +650,48 @@ D3D12_CPU_DESCRIPTOR_HANDLE D3D12Context::rtv_handle(std::uint32_t index) const 
     D3D12_CPU_DESCRIPTOR_HANDLE handle = rtv_heap_->GetCPUDescriptorHandleForHeapStart();
     handle.ptr += static_cast<SIZE_T>(index) * rtv_descriptor_size_;
     return handle;
+}
+
+bool D3D12Context::report_live_objects() noexcept
+{
+#if defined(DAEDALUS_DEBUG_BUILD)
+    Log::info("DXGI live-object report begin (application graphics resources already released)");
+    HMODULE module = LoadLibraryW(L"dxgidebug.dll");
+    if (module == nullptr)
+    {
+        Log::warning("DXGI live-object report unavailable: dxgidebug.dll could not be loaded");
+        return false;
+    }
+    using GetDebugInterface = HRESULT(WINAPI*)(UINT, REFIID, void**);
+    const auto get_debug_interface = reinterpret_cast<GetDebugInterface>(GetProcAddress(module, "DXGIGetDebugInterface1"));
+    if (get_debug_interface == nullptr)
+    {
+        Log::warning("DXGI live-object report unavailable: DXGIGetDebugInterface1 was not found");
+        FreeLibrary(module);
+        return false;
+    }
+    Microsoft::WRL::ComPtr<IDXGIDebug1> debug;
+    const HRESULT acquire = get_debug_interface(0, IID_PPV_ARGS(&debug));
+    if (FAILED(acquire))
+    {
+        Log::error(format_failure_message(static_cast<ResultCode>(acquire), "DXGIGetDebugInterface1"));
+        FreeLibrary(module);
+        return false;
+    }
+    const HRESULT report = debug->ReportLiveObjects(
+        DXGI_DEBUG_ALL, static_cast<DXGI_DEBUG_RLO_FLAGS>(DXGI_DEBUG_RLO_DETAIL | DXGI_DEBUG_RLO_IGNORE_INTERNAL));
+    debug.Reset();
+    FreeLibrary(module);
+    if (FAILED(report))
+    {
+        Log::error(format_failure_message(static_cast<ResultCode>(report), "IDXGIDebug1::ReportLiveObjects"));
+        return false;
+    }
+    Log::info("DXGI live-object report end; inspect debugger output for unexpected application-owned objects");
+    return true;
+#else
+    Log::warning("DXGI live-object reporting requires a Debug build");
+    return false;
+#endif
 }
 }

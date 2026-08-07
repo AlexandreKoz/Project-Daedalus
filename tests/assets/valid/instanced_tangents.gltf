@@ -1,0 +1,110 @@
+{
+  "asset": {
+    "version": "2.0",
+    "generator": "Daedalus fixture generator"
+  },
+  "buffers": [
+    {
+      "uri": "data:application/octet-stream;base64,zczMvs3MzL4AAAAAzczMPs3MzL4AAAAAAAAAAM3MzD4AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAAAAAACAPwAAAAAAAIA/AAAAAAAAgL8AAIC/AAAAAAAAAAAAAIA/AAABAAIA",
+      "byteLength": 126
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 36
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 36,
+      "byteLength": 36
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 72,
+      "byteLength": 48
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 120,
+      "byteLength": 6
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC4"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5123,
+      "count": 3,
+      "type": "SCALAR"
+    }
+  ],
+  "meshes": [
+    {
+      "name": "InstancedTangentMesh",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "TANGENT": 2
+          },
+          "indices": 3
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "LeftInstance",
+      "mesh": 0,
+      "translation": [
+        -1.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "RightNegativeInstance",
+      "mesh": 0,
+      "translation": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        -1.0,
+        1.0,
+        1.0
+      ]
+    }
+  ],
+  "scenes": [
+    {
+      "name": "Instances",
+      "nodes": [
+        0,
+        1
+      ]
+    }
+  ],
+  "scene": 0
+}

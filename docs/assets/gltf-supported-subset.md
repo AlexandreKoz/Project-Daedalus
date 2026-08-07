@@ -5,7 +5,7 @@
 - JSON `.gltf` and binary `.glb` version 2.
 - One JSON chunk and an optional BIN chunk in GLB.
 - External relative URIs, strict base64 or percent-decoded data URIs, GLB buffers, and image bufferViews.
-- PNG and baseline/progressive JPEG payloads in the declared source-component subset. Portable import validates PNG chunks, CRCs, IHDR fields and dimensions, and validates JPEG marker framing, frame dimensions/components, scan presence, and end marker before canonical insertion. The Windows runtime performs full WIC decode and cross-checks dimensions.
+- PNG and baseline/progressive JPEG payloads in the declared source-component subset. Import first validates container/marker metadata, then performs a full assets-layer pixel decode before success and stores owned top-left-origin RGBA8 pixels in the canonical image. Windows uses WIC and non-Windows builds use libpng/libjpeg behind the same project-owned contract; corrupt entropy is reported as structured `invalid_image`, not deferred to renderer construction.
 - Multiple scenes, roots, nodes, meshes, triangle primitives, materials, textures, images, samplers, cameras, and punctual lights.
 - Accessor component types BYTE, UNSIGNED_BYTE, SHORT, UNSIGNED_SHORT, UNSIGNED_INT, and FLOAT; normalized integer conversion; tightly packed and interleaved data.
 - `POSITION`, `NORMAL`, `TANGENT`, `TEXCOORD_0`, `TEXCOORD_1`, and VEC3/VEC4 `COLOR_0` under glTF semantic/type/component rules.
@@ -28,3 +28,11 @@
 ## Not implemented
 
 Animation, skins, morph targets, sparse accessors, Draco/meshopt compression, KTX/Basis, material extensions, texture transforms, mip generation, colour-profile conversion, alpha rendering, and complete extension coverage belong to later work.
+
+## Audit-closure clarifications
+
+- Omitted primitive material uses the glTF default material, never source material 0.
+- Base-colour, metallic-roughness, normal, occlusion, and emissive references preserve `texCoord` 0 or 1. A referenced set absent from a primitive is an `invalid_source` / `missing_texture_coordinate` error.
+- PNG/JPEG acceptance requires full decode to RGBA8 before import success. Structurally plausible but undecodable entropy is `invalid_image`.
+- Slight unit-length deviations up to 0.01 for normals, tangent XYZ, and rotation quaternions may be normalized with explicit repair diagnostics. Zero, non-finite, or larger deviations are rejected.
+- Sparse accessors and texture transforms remain unsupported.

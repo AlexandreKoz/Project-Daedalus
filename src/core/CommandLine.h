@@ -15,6 +15,7 @@ enum class DiagnosticMode
     shaded,
     normals,
     uv,
+    tangents,
     bounds
 };
 
@@ -23,10 +24,14 @@ struct CommandLineOptions
     bool use_warp = false;
     bool show_help = false;
     bool dump_scene = false;
+    bool stress_resize = false;
+    bool report_live_objects = false;
     std::optional<std::uint64_t> frame_limit;
+    std::optional<std::uint64_t> stress_reload_count;
     std::optional<std::filesystem::path> asset_path;
     std::optional<std::string> scene_selector;
     std::optional<std::filesystem::path> import_report_path;
+    std::optional<std::filesystem::path> stress_alternate_asset_path;
     DiagnosticMode diagnostic_mode = DiagnosticMode::shaded;
 };
 

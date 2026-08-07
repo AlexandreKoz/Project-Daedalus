@@ -2,11 +2,11 @@
 
 #include "core/Error.h"
 #include "core/Log.h"
-#include "graphics/WicImageDecoder.h"
 
 #include <algorithm>
 #include <array>
 #include <climits>
+#include <cstddef>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -150,6 +150,7 @@ struct FilterBits
     case DiagnosticMode::shaded: return 0;
     case DiagnosticMode::normals: return 1;
     case DiagnosticMode::uv: return 2;
+    case DiagnosticMode::tangents: return 4;
     case DiagnosticMode::bounds: return 0;
     }
     return 0;
@@ -172,7 +173,10 @@ DiagnosticSceneRenderer::DiagnosticSceneRenderer(D3D12Context& context,
       viewport_height_(context.height())
 {
     static_assert(sizeof(Vertex) == 72, "canonical Vertex layout changed; update the D3D12 input layout");
-    static_assert(sizeof(DrawConstants) <= 256, "draw constants must fit one 256-byte CBV slot");
+    static_assert(sizeof(DrawConstants) == 240, "CPU/HLSL DrawConstants packing changed");
+    static_assert(offsetof(DrawConstants, diagnostic_mode) == 208, "CPU/HLSL diagnostic-mode offset changed");
+    static_assert(offsetof(DrawConstants, texture_coord_set) == 220, "CPU/HLSL UV-set offset changed");
+    static_assert(offsetof(DrawConstants, world_handedness) == 224, "CPU/HLSL handedness offset changed");
     if (device_ == nullptr) throw std::invalid_argument("DiagnosticSceneRenderer requires a D3D12 device");
 
     create_root_signature();
@@ -346,10 +350,12 @@ void DiagnosticSceneRenderer::create_textures()
         const Texture& texture = scene_.textures[index];
         if (!texture.image.valid() || texture.image.value() >= scene_.images.size())
             throw std::runtime_error("canonical texture references an invalid image");
-        const DecodedImage decoded = decode_image_wic(scene_.images[texture.image.value()].encoded_bytes);
-        if (decoded.width != scene_.images[texture.image.value()].width || decoded.height != scene_.images[texture.image.value()].height)
-            throw std::runtime_error("WIC dimensions disagree with portable image validation");
-        textures_.push_back(upload_texture_rgba8(decoded.width, decoded.height, decoded.rgba8.data()));
+        const Image& image = scene_.images[texture.image.value()];
+        const std::uint64_t expected_bytes = checked_multiply_u64(
+            checked_multiply_u64(image.width, image.height, "canonical decoded image"), 4U, "canonical decoded image");
+        if (image.decoded_rgba8.size() != expected_bytes || image.row_stride != static_cast<std::uint64_t>(image.width) * 4ULL)
+            throw std::runtime_error("canonical image does not contain validated tightly packed RGBA8 pixels");
+        textures_.push_back(upload_texture_rgba8(image.width, image.height, image.decoded_rgba8.data()));
         const std::uint32_t linear_descriptor = static_cast<std::uint32_t>(index * 2U + 1U);
         const std::uint32_t srgb_descriptor = linear_descriptor + 1U;
         texture_linear_srv_indices_[index] = linear_descriptor;
@@ -408,7 +414,8 @@ void DiagnosticSceneRenderer::create_geometry()
         gpu.index_view.Format = DXGI_FORMAT_R32_UINT;
         gpu.index_count = checked_uint(primitive.indices.size(), "index count");
         gpu.material = primitive.material;
-        gpu.has_texture_coordinates = primitive.has_texcoord0;
+        gpu.has_texcoord0 = primitive.has_texcoord0;
+        gpu.has_texcoord1 = primitive.has_texcoord1;
         gpu.has_vertex_colors = primitive.has_colors;
         primitives_.push_back(std::move(gpu));
     }
@@ -416,24 +423,10 @@ void DiagnosticSceneRenderer::create_geometry()
 
 void DiagnosticSceneRenderer::create_draw_items()
 {
-    if (!scene_.selected_scene.valid() || scene_.selected_scene.value() >= scene_.scenes.size())
-        throw std::runtime_error("canonical scene has no valid selected scene");
-    std::function<void(NodeId)> visit = [&](NodeId id)
-    {
-        if (!id.valid() || id.value() >= scene_.nodes.size()) return;
-        const Node& node = scene_.nodes[id.value()];
-        if (node.mesh.valid() && node.mesh.value() < scene_.meshes.size())
-        {
-            for (const PrimitiveId primitive : scene_.meshes[node.mesh.value()].primitives)
-            {
-                if (!primitive.valid() || primitive.value() >= primitives_.size())
-                    throw std::runtime_error("canonical mesh references an invalid primitive");
-                draw_items_.push_back({primitive.value(), node.world_transform});
-            }
-        }
-        for (const NodeId child : node.children) visit(child);
-    };
-    for (const NodeId root : scene_.scenes[scene_.selected_scene.value()].roots) visit(root);
+    draw_items_ = prepare_diagnostic_draws(scene_);
+    for (const PreparedDiagnosticDraw& draw : draw_items_)
+        if (draw.primitive_index >= primitives_.size())
+            throw std::runtime_error("prepared draw references an invalid GPU primitive");
 }
 
 void DiagnosticSceneRenderer::create_bounds_geometry()
@@ -643,7 +636,7 @@ void DiagnosticSceneRenderer::record(const FrameRecordingContext& frame)
     const Mat4 view_projection = camera_.view_projection_matrix(aspect);
     for (std::size_t index = 0; index < draw_items_.size(); ++index)
     {
-        const DrawItem& draw = draw_items_[index];
+        const PreparedDiagnosticDraw& draw = draw_items_[index];
         const GpuPrimitive& primitive = primitives_[draw.primitive_index];
         DrawConstants constants{};
         constants.world = draw.world;
@@ -651,24 +644,21 @@ void DiagnosticSceneRenderer::record(const FrameRecordingContext& frame)
         bool invertible = false;
         constants.normal_matrix = inverse_transpose(draw.world, &invertible);
         if (!invertible) constants.normal_matrix = identity_matrix();
-        constants.base_color_factor = {1.0F, 1.0F, 1.0F, 1.0F};
+        constants.base_color_factor = draw.base_color_factor;
         constants.diagnostic_mode = diagnostic_value(mode_);
         constants.use_vertex_color = primitive.has_vertex_colors ? 1U : 0U;
+        constants.texture_coord_set = draw.texture_coord_set;
+        constants.world_handedness = draw.negative_determinant ? -1.0F : 1.0F;
         std::uint32_t srv_index = 0;
         std::uint32_t sampler_index = 0;
-        if (primitive.material.valid() && primitive.material.value() < scene_.materials.size())
+        if (draw.base_color_texture.has_value() && draw.selected_texcoord_available)
         {
-            const Material& material = scene_.materials[primitive.material.value()];
-            constants.base_color_factor = material.base_color_factor;
-            if (material.base_color_texture.has_value() && primitive.has_texture_coordinates)
+            const std::uint32_t texture_index = draw.base_color_texture->value();
+            if (texture_index < texture_srgb_srv_indices_.size())
             {
-                const std::uint32_t texture_index = material.base_color_texture->texture.value();
-                if (texture_index < texture_srgb_srv_indices_.size())
-                {
-                    srv_index = texture_srgb_srv_indices_[texture_index];
-                    sampler_index = texture_sampler_indices_[texture_index];
-                    constants.has_texture = 1;
-                }
+                srv_index = texture_srgb_srv_indices_[texture_index];
+                sampler_index = texture_sampler_indices_[texture_index];
+                constants.has_texture = 1;
             }
         }
         const std::size_t slot = frame_slot_base + index;

@@ -76,7 +76,7 @@ void log_import_report(const ImportReport& report)
 }
 }
 
-Application::Application(CommandLineOptions options) : options_(std::move(options))
+Application::Application(CommandLineOptions options) : options_(std::move(options)), primary_asset_path_(options_.asset_path)
 {
 }
 
@@ -114,6 +114,7 @@ int Application::run()
 {
     std::uint64_t presented_frames = 0;
     window_->show(SW_SHOWDEFAULT);
+    if (options_.stress_resize) window_->begin_stress_sequence();
 
     while (window_->process_messages())
     {
@@ -122,6 +123,8 @@ int Application::run()
             graphics_->resize(resized->first, resized->second);
             renderer_->resize(resized->first, resized->second);
         }
+        if (options_.stress_resize && !stress_resize_completed_)
+            stress_resize_completed_ = window_->advance_stress_sequence();
 
         if (window_->consume_reload_request())
         {
@@ -139,6 +142,7 @@ int Application::run()
         renderer_->record(frame);
         graphics_->end_frame();
         ++presented_frames;
+        run_stress_actions(presented_frames);
 
         if (options_.frame_limit.has_value() && presented_frames >= *options_.frame_limit)
         {
@@ -146,6 +150,11 @@ int Application::run()
             break;
         }
     }
+
+    if (options_.stress_reload_count.has_value() && stress_reloads_completed_ != *options_.stress_reload_count)
+        throw std::runtime_error("runtime stress ended before all requested scene reloads completed");
+    if (options_.stress_resize && !stress_resize_completed_)
+        throw std::runtime_error("runtime stress ended before the resize-state sequence completed");
 
     graphics_->wait_for_gpu();
     std::ostringstream stream;
@@ -210,6 +219,24 @@ void Application::reload_scene()
     Log::info("Scene reload complete");
 }
 
+void Application::run_stress_actions(std::uint64_t presented_frames)
+{
+    if (!options_.stress_reload_count.has_value() || stress_reloads_completed_ >= *options_.stress_reload_count)
+        return;
+    constexpr std::uint64_t frames_per_reload = 5;
+    if (presented_frames % frames_per_reload != 0) return;
+
+    if (options_.stress_alternate_asset_path.has_value())
+    {
+        alternate_asset_active_ = !alternate_asset_active_;
+        options_.asset_path = alternate_asset_active_ ? options_.stress_alternate_asset_path : primary_asset_path_;
+    }
+    reload_scene();
+    ++stress_reloads_completed_;
+    Log::info("Runtime stress reload " + std::to_string(stress_reloads_completed_) + "/" +
+              std::to_string(*options_.stress_reload_count) + " complete");
+}
+
 void Application::write_import_report() const
 {
     if (!options_.import_report_path.has_value()) return;
@@ -238,7 +265,7 @@ void Application::initialize()
     Log::info("Diagnostic mode: " + std::string(to_string(options_.diagnostic_mode)));
 
     const HRESULT com_result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    if (FAILED(com_result)) throw std::runtime_error("CoInitializeEx failed for WIC image decoding");
+    if (FAILED(com_result)) throw std::runtime_error("CoInitializeEx failed for Windows graphics services");
     com_initialized_ = true;
 
     load_scene();
@@ -272,10 +299,12 @@ void Application::shutdown() noexcept
         renderer_.reset();
         if (graphics_ != nullptr)
         {
-            graphics_->shutdown();
+            graphics_->shutdown(options_.report_live_objects);
             graphics_.reset();
         }
         window_.reset();
+        if (options_.report_live_objects)
+            static_cast<void>(D3D12Context::report_live_objects());
     }
     else
     {

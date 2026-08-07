@@ -15,7 +15,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
       - name: Install Ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libpng-dev libjpeg-dev
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}
       - name: Build
@@ -23,9 +23,7 @@ jobs:
       - name: Test
         run: ctest --preset ${{ matrix.preset }}
       - name: Validate controlled fixtures
-        run: |
-          build/${{ matrix.preset }}/DaedalusAssetValidator tests/assets/valid/minimal.glb --expect-success
-          build/${{ matrix.preset }}/DaedalusAssetValidator tests/assets/invalid/accessor_oob.gltf --expect-failure
+        run: python3 scripts/validate-fixture-manifest.py build/${{ matrix.preset }}/DaedalusAssetValidator
 
   windows-vs2022:
     runs-on: windows-2022
@@ -39,9 +37,13 @@ jobs:
         run: cmake --build --preset windows-msvc-debug
       - name: Test Debug
         run: ctest --preset windows-msvc-debug
+      - name: Validate Debug controlled fixtures
+        run: python scripts/validate-fixture-manifest.py build/windows-msvc-debug/Debug/DaedalusAssetValidator.exe
       - name: Configure Release
         run: cmake --preset windows-msvc-release
       - name: Build Release
         run: cmake --build --preset windows-msvc-release
       - name: Test Release
         run: ctest --preset windows-msvc-release
+      - name: Validate Release controlled fixtures
+        run: python scripts/validate-fixture-manifest.py build/windows-msvc-release/Release/DaedalusAssetValidator.exe
