@@ -72,6 +72,9 @@ add_library(daedalus_assets STATIC
 target_link_libraries(daedalus_assets PUBLIC daedalus_core daedalus_scene)
 if(WIN32)
     target_link_libraries(daedalus_assets PRIVATE windowscodecs ole32)
+    target_compile_definitions(daedalus_assets PRIVATE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX)
 else()
     find_package(PNG REQUIRED)
     find_package(JPEG REQUIRED)
