@@ -27,7 +27,7 @@ The corpus now contains 10 valid/degraded top-level fixtures and 25 invalid fixt
 - `uv1_scene.gltf` / `missing_uv1.gltf`: visibly divergent UV0/UV1 and missing-set rejection;
 - `instanced_tangents.gltf`: one mesh, two transformed instances, negative determinant, tangent signs;
 - `repaired_vectors.gltf`: explicit normal/tangent/quaternion repair diagnostics;
-- `corrupt_entropy_png.gltf`: valid PNG chunk structure but undecodable pixel stream;
+- `corrupt_entropy_png.gltf`: valid PNG chunk framing but an invalid PNG zlib/DEFLATE stream header; rejected before backend-specific decoder permissiveness can admit it;
 - `corrupt_entropy_jpeg.gltf`: plausible JPEG marker structure but corrupt scan entropy;
 - `zero_normal.gltf`, `zero_tangent.gltf`, `zero_quaternion.gltf`: gross invalid-vector rejection.
 

@@ -21,7 +21,7 @@ All supported texture references retain set 0/1. Primitive/material validation r
 
 ### F-03 — full image decode boundary: CLOSED
 
-`assets/ImageDecoder` performs full supported PNG/JPEG decode before import success. Canonical images own RGBA8 pixels and row stride. The D3D12 renderer no longer invokes WIC or hides decode failure. `corrupt_entropy_png.gltf` and `corrupt_entropy_jpeg.gltf` pass superficial container/marker inspection but are rejected by the real decoder as `invalid_image`.
+`assets/ImageDecoder` performs full supported PNG/JPEG decode before import success. Canonical images own RGBA8 pixels and row stride. The D3D12 renderer no longer invokes WIC or hides decode failure. Windows validation later showed that WIC can permissively accept the synthetic bad-PNG entropy fixture, so the importer now also validates the PNG zlib/DEFLATE envelope before backend decode; `corrupt_entropy_png.gltf` and `corrupt_entropy_jpeg.gltf` are still required to resolve to structured `invalid_image`.
 
 ### F-04 — resource accounting: CLOSED
 

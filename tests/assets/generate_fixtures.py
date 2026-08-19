@@ -380,7 +380,9 @@ repair_doc = {
 }
 (VALID / "repaired_vectors.gltf").write_text(json.dumps(repair_doc, indent=2), encoding="utf-8")
 
-# Structurally valid PNG chunks with invalid compressed pixel entropy.
+# Structurally valid PNG chunks whose IDAT payload does not begin with a legal
+# PNG zlib/DEFLATE stream. Some Windows WIC versions are permissive here, so the
+# importer validates the zlib envelope before backend-specific pixel decode.
 def png_with_bad_entropy() -> bytes:
     def chunk(kind: bytes, data: bytes) -> bytes:
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)

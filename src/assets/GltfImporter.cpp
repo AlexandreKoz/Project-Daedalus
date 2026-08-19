@@ -926,6 +926,8 @@ void validate_mesh_attribute_accessor(const AccessorData& accessor,
         bool saw_header = false;
         bool saw_data = false;
         bool saw_end = false;
+        std::array<std::byte, 2> zlib_header{};
+        std::size_t zlib_header_size = 0;
         std::uint32_t width = 0;
         std::uint32_t height = 0;
         std::uint32_t components = 0;
@@ -978,7 +980,20 @@ void validate_mesh_attribute_accessor(const AccessorData& accessor,
             {
                 fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image, std::string(location), "PNG contains more than one IHDR chunk");
             }
-            if (type == "IDAT") saw_data = true;
+            if (type == "IDAT")
+            {
+                saw_data = true;
+                const std::size_t needed = zlib_header.size() - zlib_header_size;
+                const std::size_t available = static_cast<std::size_t>(length);
+                const std::size_t copy_count = std::min(needed, available);
+                if (copy_count > 0U)
+                {
+                    std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(offset + 8U),
+                                static_cast<std::ptrdiff_t>(copy_count),
+                                zlib_header.begin() + static_cast<std::ptrdiff_t>(zlib_header_size));
+                    zlib_header_size += copy_count;
+                }
+            }
             if (type == "IEND")
             {
                 if (length != 0U || !saw_data)
@@ -991,6 +1006,20 @@ void validate_mesh_attribute_accessor(const AccessorData& accessor,
         }
         if (!saw_header || !saw_data || !saw_end || offset != bytes.size())
             fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image, std::string(location), "PNG is incomplete or has trailing bytes after IEND");
+        if (zlib_header_size != zlib_header.size())
+            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image, std::string(location), "PNG IDAT stream is too short to contain a zlib header");
+
+        const std::uint8_t cmf = static_cast<std::uint8_t>(zlib_header[0]);
+        const std::uint8_t flg = static_cast<std::uint8_t>(zlib_header[1]);
+        const std::uint16_t zlib_header_word = static_cast<std::uint16_t>((static_cast<std::uint16_t>(cmf) << 8U) | flg);
+        const bool deflate_method = (cmf & 0x0FU) == 8U;
+        const bool valid_window = (cmf >> 4U) <= 7U;
+        const bool valid_check_bits = (zlib_header_word % 31U) == 0U;
+        const bool uses_preset_dictionary = (flg & 0x20U) != 0U;
+        if (!deflate_method || !valid_window || !valid_check_bits || uses_preset_dictionary)
+            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image, std::string(location),
+                 "PNG IDAT stream does not begin with a valid PNG zlib/DEFLATE header");
+
         detected_mime = "image/png";
         return {width, height, components};
     }
