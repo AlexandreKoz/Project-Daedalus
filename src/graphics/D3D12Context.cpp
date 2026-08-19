@@ -19,6 +19,8 @@ namespace daedalus
 {
 namespace
 {
+constexpr DWORD kFenceWaitTimeoutMs = 30'000;
+
 [[nodiscard]] std::string utf8_from_wide(const wchar_t* value)
 {
     if (value == nullptr || *value == L'\0')
@@ -551,17 +553,31 @@ void D3D12Context::create_render_targets()
 
 void D3D12Context::wait_for_fence(std::uint64_t value)
 {
-    if (fence_->GetCompletedValue() >= value)
+    const std::uint64_t completed = fence_->GetCompletedValue();
+    if (completed == std::numeric_limits<std::uint64_t>::max())
+    {
+        const HRESULT removed_reason = device_->GetDeviceRemovedReason();
+        throw ResultError(static_cast<ResultCode>(FAILED(removed_reason) ? removed_reason : DXGI_ERROR_DEVICE_REMOVED),
+                          "D3D12 fence reported device removal");
+    }
+    if (completed >= value)
     {
         return;
     }
 
     DAEDALUS_THROW_IF_FAILED(fence_->SetEventOnCompletion(value, fence_event_.get()));
-    const DWORD wait_result = WaitForSingleObject(fence_event_.get(), INFINITE);
+    const DWORD wait_result = WaitForSingleObject(fence_event_.get(), kFenceWaitTimeoutMs);
     if (wait_result == WAIT_FAILED)
     {
         throw ResultError(
             static_cast<ResultCode>(HRESULT_FROM_WIN32(GetLastError())), "WaitForSingleObject for D3D12 fence");
+    }
+    if (wait_result == WAIT_TIMEOUT)
+    {
+        const HRESULT removed_reason = device_->GetDeviceRemovedReason();
+        if (FAILED(removed_reason))
+            throw ResultError(static_cast<ResultCode>(removed_reason), "D3D12 device removed while waiting for fence");
+        throw std::runtime_error("timed out after 30000 ms while waiting for the D3D12 fence");
     }
     if (wait_result != WAIT_OBJECT_0)
     {
@@ -587,7 +603,17 @@ bool D3D12Context::try_wait_for_gpu() noexcept
         return false;
     }
 
-    if (fence_->GetCompletedValue() < signal_value)
+    const std::uint64_t completed = fence_->GetCompletedValue();
+    if (completed == std::numeric_limits<std::uint64_t>::max())
+    {
+        const HRESULT removed_reason = device_ != nullptr ? device_->GetDeviceRemovedReason() : DXGI_ERROR_DEVICE_REMOVED;
+        Log::error(format_failure_message(
+            static_cast<ResultCode>(FAILED(removed_reason) ? removed_reason : DXGI_ERROR_DEVICE_REMOVED),
+            "D3D12 fence reported device removal during shutdown"));
+        return false;
+    }
+
+    if (completed < signal_value)
     {
         const HRESULT event_result = fence_->SetEventOnCompletion(signal_value, fence_event_.get());
         if (FAILED(event_result))
@@ -597,7 +623,7 @@ bool D3D12Context::try_wait_for_gpu() noexcept
             return false;
         }
 
-        const DWORD wait_result = WaitForSingleObject(fence_event_.get(), INFINITE);
+        const DWORD wait_result = WaitForSingleObject(fence_event_.get(), kFenceWaitTimeoutMs);
         if (wait_result != WAIT_OBJECT_0)
         {
             if (wait_result == WAIT_FAILED)
@@ -605,6 +631,22 @@ bool D3D12Context::try_wait_for_gpu() noexcept
                 Log::error(format_failure_message(
                     static_cast<ResultCode>(HRESULT_FROM_WIN32(GetLastError())),
                     "WaitForSingleObject for D3D12 fence during shutdown"));
+            }
+            else if (wait_result == WAIT_TIMEOUT)
+            {
+                const HRESULT removed_reason =
+                    device_ != nullptr ? device_->GetDeviceRemovedReason() : DXGI_ERROR_DEVICE_REMOVED;
+                if (FAILED(removed_reason))
+                {
+                    Log::error(format_failure_message(
+                        static_cast<ResultCode>(removed_reason),
+                        "D3D12 device removed while waiting for shutdown fence"));
+                }
+                else
+                {
+                    Log::error("Timed out after 30000 ms while waiting for the D3D12 shutdown fence; "
+                               "resources will be retained until process exit.");
+                }
             }
             else
             {

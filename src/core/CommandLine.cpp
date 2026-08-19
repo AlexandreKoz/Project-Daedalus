@@ -57,6 +57,7 @@ CommandLineOptions parse_command_line(std::span<const std::wstring_view> argumen
         else if (argument == L"--dump-scene") options.dump_scene = true;
         else if (argument == L"--stress-resize") options.stress_resize = true;
         else if (argument == L"--report-live-objects") options.report_live_objects = true;
+        else if (argument == L"--no-error-dialog") options.suppress_error_dialog = true;
         else if (argument == L"--stress-reloads")
         {
             if (options.stress_reload_count.has_value()) throw CommandLineError("--stress-reloads may be specified only once");
@@ -130,6 +131,7 @@ std::string usage_text()
         "  --stress-alternate-asset <p>   Alternate assets during reload stress.\n"
         "  --stress-resize                Exercise deterministic resize/window states.\n"
         "  --report-live-objects          Report D3D12/DXGI live objects after teardown.\n"
+        "  --no-error-dialog              Never show a modal fatal-error dialog (automation-safe).\n"
         "  --help, -h, /?                 Show this help without initializing Direct3D 12.\n";
 }
 

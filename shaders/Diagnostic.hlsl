@@ -30,6 +30,7 @@ cbuffer DrawConstants : register(b0)
     float world_handedness;
     uint padding0;
     uint padding1;
+    uint padding2;
 };
 
 Texture2D<float4> base_color_texture : register(t0);

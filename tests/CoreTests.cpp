@@ -67,13 +67,15 @@ void test_stress_command_line()
         std::wstring_view(L"--asset"), std::wstring_view(L"first.glb"),
         std::wstring_view(L"--stress-reloads"), std::wstring_view(L"12"),
         std::wstring_view(L"--stress-alternate-asset"), std::wstring_view(L"second.gltf"),
-        std::wstring_view(L"--stress-resize"), std::wstring_view(L"--report-live-objects")};
+        std::wstring_view(L"--stress-resize"), std::wstring_view(L"--report-live-objects"),
+        std::wstring_view(L"--no-error-dialog")};
     const daedalus::CommandLineOptions options = daedalus::parse_command_line(arguments);
     require(options.stress_reload_count == 12, "stress reload count must parse");
     require(options.stress_alternate_asset_path == std::filesystem::path(L"second.gltf"),
             "alternate stress asset must parse");
     require(options.stress_resize, "resize stress flag must parse");
     require(options.report_live_objects, "live-object flag must parse");
+    require(options.suppress_error_dialog, "automation-safe error-dialog suppression must parse");
 
     constexpr std::array alternate_without_asset{
         std::wstring_view(L"--stress-reloads"), std::wstring_view(L"2"),
@@ -93,6 +95,7 @@ void test_stress_command_line()
     require(help.find("--stress-reloads") != std::string::npos, "help must document reload stress");
     require(help.find("--stress-resize") != std::string::npos, "help must document resize stress");
     require(help.find("--report-live-objects") != std::string::npos, "help must document live-object reporting");
+    require(help.find("--no-error-dialog") != std::string::npos, "help must document automation-safe error handling");
 }
 
 void test_result_formatting()

@@ -26,6 +26,7 @@ struct CommandLineOptions
     bool dump_scene = false;
     bool stress_resize = false;
     bool report_live_objects = false;
+    bool suppress_error_dialog = false;
     std::optional<std::uint64_t> frame_limit;
     std::optional<std::uint64_t> stress_reload_count;
     std::optional<std::filesystem::path> asset_path;

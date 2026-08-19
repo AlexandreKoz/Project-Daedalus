@@ -10,6 +10,9 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <Windows.h>
 #include <objbase.h>
 
@@ -59,6 +62,15 @@ namespace
     return value ? "yes" : "no";
 }
 
+[[nodiscard]] bool should_show_fatal_error_dialog(const CommandLineOptions& options) noexcept
+{
+    // Frame-limited and stress runs are automation paths; a modal MessageBox would deadlock CI/acceptance runs.
+    return !options.suppress_error_dialog &&
+           !options.frame_limit.has_value() &&
+           !options.stress_reload_count.has_value() &&
+           !options.stress_resize;
+}
+
 void log_import_report(const ImportReport& report)
 {
     Log::info(report.summary());
@@ -96,7 +108,8 @@ int Application::execute(const CommandLineOptions& options)
     catch (const std::exception& error)
     {
         Log::error(error.what());
-        MessageBoxA(nullptr, error.what(), "Project Daedalus - fatal error", MB_OK | MB_ICONERROR | MB_TASKMODAL);
+        if (should_show_fatal_error_dialog(options))
+            MessageBoxA(nullptr, error.what(), "Project Daedalus - fatal error", MB_OK | MB_ICONERROR | MB_TASKMODAL);
         application.shutdown();
         return EXIT_FAILURE;
     }
@@ -104,7 +117,8 @@ int Application::execute(const CommandLineOptions& options)
     {
         constexpr const char* message = "unknown fatal error";
         Log::error(message);
-        MessageBoxA(nullptr, message, "Project Daedalus - fatal error", MB_OK | MB_ICONERROR | MB_TASKMODAL);
+        if (should_show_fatal_error_dialog(options))
+            MessageBoxA(nullptr, message, "Project Daedalus - fatal error", MB_OK | MB_ICONERROR | MB_TASKMODAL);
         application.shutdown();
         return EXIT_FAILURE;
     }

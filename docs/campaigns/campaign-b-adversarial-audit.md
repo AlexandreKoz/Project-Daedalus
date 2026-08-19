@@ -69,3 +69,8 @@ The canonical Python packager enumerates files in UTF-8 lexical order, rejects p
 ## Remaining limitations and blockers
 
 Portable PNG/JPEG decoding uses separately installed libpng/libjpeg-turbo rather than vendored byte-pinned decoder source; exact versions used by this delivery environment are recorded in `THIRD_PARTY_NOTICES.md`. The exact final archive still needs Windows VS2022/VS2026 build/test as available, hardware/WARP diagnostic runs, automated stress execution, interactive camera checks, debugger/live-object inspection, and hosted CI. These are not converted into PASS by source review.
+
+
+## Post-closure Windows hardening follow-up (2026-08-08)
+
+Developer-side VS2026 testing of a later closure snapshot exposed two source-level Windows build defects: missing effective `NOMINMAX` protection for the WIC-backed asset decoder and an MSVC C4324 warning-as-error caused by implicit tail padding in the diagnostic constant-buffer mirror. The subsequent Windows-hardening pass also fixed acceptance-wrapper drift, modal error-dialog blocking in unattended runs, unbounded D3D12 fence waits, and orphaned dead Windows implementations. A portable CPU/HLSL ABI contract and `scripts/source-health.py` were added so these classes of regression are caught earlier. Exact repaired Windows execution remains developer-side evidence and is not inferred from portable tests.

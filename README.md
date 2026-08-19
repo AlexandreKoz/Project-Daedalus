@@ -121,9 +121,10 @@ Daedalus.exe [--asset <path.gltf|path.glb>]
              [--stress-alternate-asset <path>]
              [--stress-resize]
              [--report-live-objects]
+             [--no-error-dialog]
 ```
 
-A failed requested asset never silently falls back to the built-in triangle. Stress reloads wait for GPU idle, destroy the renderer, reload the real canonical scene, recreate uploads/descriptors, and may alternate two assets. `--stress-resize` exercises resize/minimize/restore/maximize states. `--report-live-objects` requests a Debug post-teardown DXGI report.
+A failed requested asset never silently falls back to the built-in triangle. Stress reloads wait for GPU idle, destroy the renderer, reload the real canonical scene, recreate uploads/descriptors, and may alternate two assets. `--stress-resize` exercises resize/minimize/restore/maximize states. `--report-live-objects` requests a Debug post-teardown DXGI report. Frame-limited/stress runs suppress modal fatal-error dialogs automatically so automated validation cannot hang; `--no-error-dialog` makes that behavior explicit for any invocation.
 
 Camera controls: left-drag orbit, right-drag pan, wheel dolly, `R` reframe, `F5` reload.
 

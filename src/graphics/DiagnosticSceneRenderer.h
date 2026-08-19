@@ -7,6 +7,9 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <Windows.h>
 #include <d3d12.h>
 #include <wrl/client.h>
@@ -14,6 +17,7 @@
 #include "core/CommandLine.h"
 #include "graphics/D3D12Context.h"
 #include "rendering/DiagnosticPreparation.h"
+#include "rendering/DiagnosticShaderContract.h"
 #include "rendering/OrbitCamera.h"
 #include "scene/Scene.h"
 
@@ -57,20 +61,7 @@ private:
         bool has_vertex_colors = false;
     };
 
-    struct alignas(16) DrawConstants
-    {
-        Mat4 world_view_projection{};
-        Mat4 world{};
-        Mat4 normal_matrix{};
-        Vec4 base_color_factor{};
-        std::uint32_t diagnostic_mode = 0;
-        std::uint32_t has_texture = 0;
-        std::uint32_t use_vertex_color = 0;
-        std::uint32_t texture_coord_set = 0;
-        float world_handedness = 1.0F;
-        std::uint32_t padding0 = 0;
-        std::uint32_t padding1 = 0;
-    };
+    using DrawConstants = DiagnosticDrawConstants;
 
     void create_root_signature();
     void create_pipeline_states(const std::filesystem::path& vertex_shader,

@@ -53,6 +53,7 @@ daedalus_apply_project_warnings(daedalus_scene)
 add_library(daedalus_rendering STATIC
     src/rendering/DiagnosticPreparation.cpp
     src/rendering/DiagnosticPreparation.h
+    src/rendering/DiagnosticShaderContract.h
     src/rendering/OrbitCamera.cpp
     src/rendering/OrbitCamera.h)
 target_link_libraries(daedalus_rendering PUBLIC daedalus_scene)
