@@ -72,7 +72,7 @@ private:
     HRESULT result_ = E_FAIL;
 };
 
-[[nodiscard]] DecodedImage decode_wic(std::span<const std::byte> encoded)
+[[nodiscard]] DecodedImage decode_wic(std::span<const std::byte> encoded, std::string_view mime_type)
 {
     ScopedComInitialization com;
     if (encoded.empty() || encoded.size() > static_cast<std::size_t>(std::numeric_limits<DWORD>::max()))
@@ -99,6 +99,29 @@ private:
     UINT width = 0;
     UINT height = 0;
     require_hresult(frame->GetSize(&width, &height), "IWICBitmapFrameDecode::GetSize");
+
+    // WIC's ordinary JPEG CopyPixels path can recover from damaged entropy data that
+    // libjpeg reports as corrupt.  Campaign B treats decoder warnings/corruption as a
+    // hard import failure, so ask the Windows JPEG decoder to build its MCU index up
+    // front when that facility is available.  GenerateOnLoad forces an entropy walk
+    // before we accept the image instead of allowing a later permissive pixel copy to
+    // hide malformed scan data.  Some JPEG variants do not support WIC indexing; they
+    // still go through the full CopyPixels decode below.
+    if (mime_type == "image/jpeg")
+    {
+        Microsoft::WRL::ComPtr<IWICJpegFrameDecode> jpeg_frame;
+        if (SUCCEEDED(frame.As(&jpeg_frame)))
+        {
+            BOOL indexing_supported = FALSE;
+            require_hresult(jpeg_frame->DoesSupportIndexing(&indexing_supported),
+                            "IWICJpegFrameDecode::DoesSupportIndexing");
+            if (indexing_supported != FALSE)
+            {
+                require_hresult(jpeg_frame->SetIndexing(WICJpegIndexingOptionsGenerateOnLoad, 1U),
+                                "IWICJpegFrameDecode::SetIndexing");
+            }
+        }
+    }
 
     Microsoft::WRL::ComPtr<IWICFormatConverter> converter;
     require_hresult(factory->CreateFormatConverter(&converter), "IWICImagingFactory::CreateFormatConverter");
@@ -361,7 +384,7 @@ DecodedImage decode_image_rgba8(std::span<const std::byte> encoded, std::string_
     if (mime_type != "image/png" && mime_type != "image/jpeg")
         throw ImageDecodeError("unsupported image MIME type: " + std::string(mime_type));
 #if defined(_WIN32)
-    return decode_wic(encoded);
+    return decode_wic(encoded, mime_type);
 #else
     return mime_type == "image/png" ? decode_png(encoded) : decode_jpeg(encoded);
 #endif
