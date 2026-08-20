@@ -1,36 +1,31 @@
-# Source delivery manifest — Campaign B Windows hardening
+# Source delivery manifest — Campaign B Windows JPEG entropy hardening
 
-- Baseline archive: `Project-Daedalus-main(5).zip`
-- Baseline SHA-256: `6acb9714c676b32657b3cafe4ed375a5ad5d843b48772853211f4dbf8de2b16d`
-- Suggested branch/PR: `fix/campaign-b-windows-hardening`
-- Output archive: `Project-Daedalus-Campaign-B-windows-hardening-source.zip`
+- Baseline archive: `Project-Daedalus-main(7).zip`
+- Baseline SHA-256: `b9aff71fda6e1823beec46d3cb0be7d7d641d063279b796975b60f52dd51c7e0`
+- Suggested branch/PR: `fix/campaign-b-strict-jpeg-entropy`
+- Output archive: `Project-Daedalus-Campaign-B-strict-jpeg-entropy-source.zip`
 - Final output SHA-256: reported externally after the archive is frozen; not embedded into the bytes it identifies.
 - Canonical archive root: `Project-Daedalus/`
 - Canonical entry timestamp: `2000-01-01T00:00:00Z`
 
-## Determinism scope
+## Repair scope
 
-`scripts/package-source.py` is the canonical delivery tool. It sorts source-relative paths by UTF-8 bytes, creates every ZIP entry explicitly, normalizes separators to `/`, fixes timestamps, strips extra/comment metadata, and uses CPython `zipfile` DEFLATE level 9. Byte identity is claimed for repeated runs with the same source bytes, CPython implementation, and zlib implementation. `scripts/package-source.ps1` remains the Windows companion.
+1. Retain the project-owned PNG zlib/DEFLATE envelope validation added after Windows WIC accepted the malformed PNG fixture.
+2. Add a platform-independent strict entropy walk for baseline sequential JPEG scans. The validator parses DHT/SOF0/SOS/DRI data, decodes the declared Huffman syntax for the expected MCU/block count, validates restart sequencing, coefficient-category/run bounds, marker boundaries, and JPEG one-bit padding, and rejects premature markers/truncated entropy before WIC/libjpeg pixel decode.
+3. Remove the ineffective WIC `SetIndexing(GenerateOnLoad)` hardening attempt; developer evidence proved WIC still accepted the controlled malformed-JPEG fixture.
+4. Keep progressive JPEG support on the existing marker-validation + full backend decode path; no unsupported claim is made that the new baseline entropy walker validates progressive refinement scans.
+5. Update the Campaign B acceptance/audit/subset/fixture/experiment documentation so B-16 remains BLOCKED until this exact patch passes on Windows.
 
-## Included
+## Validation performed in the delivery environment
 
-CMake/presets/workflows, project-owned C++20/HLSL, controlled fixtures and generator, validation/packaging/source-health scripts, architecture and acceptance documentation, handoff documents, README, notices, and version metadata.
+- `python3 scripts/source-health.py`: PASS.
+- GNU C++20 warnings-as-errors portable Debug configure/build/CTest: PASS, 3/3.
+- GNU C++20 warnings-as-errors portable Release configure/build/CTest: PASS, 3/3.
+- Direct validator: `valid/jpeg_image.gltf`: accepted.
+- Direct validator: `invalid/corrupt_entropy_jpeg.gltf --expect-failure`: PASS with structured `invalid_image` caused by premature marker before the expected MCU blocks completed.
 
-## Rejected/excluded
+Windows/MSVC/WIC/D3D12 execution is not available in this delivery environment. Developer-side VS2026 validation is required before the malformed-input acceptance row can be promoted to PASS.
 
-`.git`, IDE state, build/output/runtime trees, CMake cache/generated projects, objects/libraries/executables/DLLs, PDB/ILK, generated DXIL, logs, Python caches, nested archives, secrets, restricted SDKs, and unauthorized assets.
+## Packaging hygiene
 
-## Revalidation performed for this delivery
-
-1. `python3 scripts/source-health.py`.
-2. GNU portable Debug and Release configure/build/CTest with warnings-as-errors.
-3. Clang 17 Release configure/build/CTest with warnings-as-errors.
-4. Clang 17 ASan+UBSan configure/build/CTest.
-5. Validator over all 10 valid/degraded and 25 invalid fixtures.
-6. Fixture regeneration and identical tree-hash verification: `4a327e4c2a7ea1a4d275548fc539ccb0f5dd9c2acf7feb60c88da2e307ba4bc9`.
-7. Generated build trees removed before packaging.
-8. Canonical package generated twice and SHA-256 compared.
-9. Final ZIP extracted to a fresh directory and portable Debug/Release tests plus source-health preflight rerun.
-10. Final source/archive hygiene scan and final SHA-256 calculation.
-
-Windows/MSVC/DXC/D3D12 execution is not claimed by this delivery environment. Developer-side VS2026 validation remains required.
+`scripts/package-source.py` is the canonical source-only packager. It rejects build trees, IDE state, generated projects, binaries, shader outputs, logs, caches, nested archives, and `.git`; entries are sorted with fixed timestamps and verified after creation.

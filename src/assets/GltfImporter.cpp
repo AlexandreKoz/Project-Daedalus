@@ -912,6 +912,495 @@ void validate_mesh_attribute_accessor(const AccessorData& accessor,
     return ~crc;
 }
 
+struct JpegHuffmanTable
+{
+    bool defined = false;
+    std::array<std::int32_t, 17> minimum_code{};
+    std::array<std::int32_t, 17> maximum_code{};
+    std::array<std::int32_t, 17> value_offset{};
+    std::array<std::uint8_t, 256> values{};
+    std::size_t value_count = 0;
+};
+
+struct JpegFrameComponent
+{
+    std::uint8_t id = 0;
+    std::uint8_t horizontal_sampling = 0;
+    std::uint8_t vertical_sampling = 0;
+};
+
+struct JpegBaselineFrame
+{
+    bool present = false;
+    bool eight_bit = false;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    std::uint8_t maximum_horizontal_sampling = 1;
+    std::uint8_t maximum_vertical_sampling = 1;
+    std::array<JpegFrameComponent, 4> components{};
+    std::size_t component_count = 0;
+};
+
+[[nodiscard]] std::uint16_t read_big_endian_u16(std::span<const std::byte> bytes, std::size_t offset)
+{
+    return static_cast<std::uint16_t>((static_cast<std::uint16_t>(bytes[offset]) << 8U) |
+                                      static_cast<std::uint16_t>(bytes[offset + 1U]));
+}
+
+[[nodiscard]] std::uint64_t ceil_divide(std::uint64_t numerator, std::uint64_t denominator)
+{
+    return numerator / denominator + (numerator % denominator == 0U ? 0U : 1U);
+}
+
+class JpegEntropyReader final
+{
+public:
+    JpegEntropyReader(std::span<const std::byte> bytes, std::size_t offset, std::string_view location)
+        : bytes_(bytes), offset_(offset), location_(location)
+    {
+    }
+
+    [[nodiscard]] std::uint8_t read_bit()
+    {
+        if (bits_remaining_ == 0U)
+        {
+            if (offset_ >= bytes_.size())
+                reject("JPEG entropy stream ends before all expected MCU blocks are decoded");
+            current_byte_ = static_cast<std::uint8_t>(bytes_[offset_++]);
+            if (current_byte_ == 0xFFU)
+            {
+                if (offset_ >= bytes_.size())
+                    reject("JPEG entropy stream ends after an unterminated 0xFF byte");
+                const std::uint8_t following = static_cast<std::uint8_t>(bytes_[offset_]);
+                if (following != 0x00U)
+                    reject("JPEG entropy stream reaches a marker before all expected MCU blocks are decoded");
+                ++offset_;
+                current_byte_ = 0xFFU;
+            }
+            bits_remaining_ = 8U;
+        }
+        --bits_remaining_;
+        return static_cast<std::uint8_t>((current_byte_ >> bits_remaining_) & 1U);
+    }
+
+    void discard_bits(std::uint8_t count)
+    {
+        for (std::uint8_t bit = 0; bit < count; ++bit) (void)read_bit();
+    }
+
+    void consume_restart_marker(std::uint8_t expected_marker)
+    {
+        align_to_marker();
+        if (offset_ >= bytes_.size() || bytes_[offset_] != std::byte{0xFF})
+            reject("JPEG restart interval is missing its restart marker");
+        while (offset_ < bytes_.size() && bytes_[offset_] == std::byte{0xFF}) ++offset_;
+        if (offset_ >= bytes_.size()) reject("JPEG restart marker is truncated");
+        const std::uint8_t marker = static_cast<std::uint8_t>(bytes_[offset_++]);
+        if (marker != static_cast<std::uint8_t>(0xD0U + expected_marker))
+            reject("JPEG restart markers are missing or out of sequence");
+    }
+
+    [[nodiscard]] std::size_t finish_scan()
+    {
+        align_to_marker();
+        if (offset_ >= bytes_.size() || bytes_[offset_] != std::byte{0xFF})
+            reject("JPEG contains extra entropy bytes after the expected MCU count");
+
+        std::size_t cursor = offset_;
+        while (cursor < bytes_.size() && bytes_[cursor] == std::byte{0xFF}) ++cursor;
+        if (cursor >= bytes_.size()) reject("JPEG scan terminates with an incomplete marker");
+        const std::uint8_t marker = static_cast<std::uint8_t>(bytes_[cursor]);
+        if (marker == 0x00U || (marker >= 0xD0U && marker <= 0xD7U))
+            reject("JPEG contains entropy or a restart marker after the expected MCU count");
+        return offset_;
+    }
+
+private:
+    void align_to_marker()
+    {
+        if (bits_remaining_ != 0U)
+        {
+            const std::uint16_t mask = static_cast<std::uint16_t>((1U << bits_remaining_) - 1U);
+            if ((static_cast<std::uint16_t>(current_byte_) & mask) != mask)
+                reject("JPEG entropy padding bits are not all set before a marker");
+            bits_remaining_ = 0U;
+        }
+    }
+
+    [[noreturn]] void reject(std::string message) const
+    {
+        fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+             std::string(location_), std::move(message));
+    }
+
+    std::span<const std::byte> bytes_;
+    std::size_t offset_ = 0;
+    std::string_view location_;
+    std::uint8_t current_byte_ = 0;
+    std::uint8_t bits_remaining_ = 0;
+};
+
+[[nodiscard]] std::uint8_t decode_jpeg_huffman_symbol(
+    JpegEntropyReader& reader,
+    const JpegHuffmanTable& table,
+    std::string_view location)
+{
+    if (!table.defined)
+        fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+             std::string(location), "JPEG scan references an undefined Huffman table");
+
+    std::int32_t code = 0;
+    for (std::size_t length = 1; length <= 16U; ++length)
+    {
+        code = (code << 1) | static_cast<std::int32_t>(reader.read_bit());
+        if (table.maximum_code[length] < 0 || code < table.minimum_code[length] || code > table.maximum_code[length])
+            continue;
+        const std::int32_t index = table.value_offset[length] + code - table.minimum_code[length];
+        if (index < 0 || static_cast<std::size_t>(index) >= table.value_count)
+            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                 std::string(location), "JPEG Huffman table resolves outside its symbol range");
+        return table.values[static_cast<std::size_t>(index)];
+    }
+    fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+         std::string(location), "JPEG entropy contains an invalid Huffman code");
+}
+
+void decode_baseline_jpeg_block(
+    JpegEntropyReader& reader,
+    const JpegHuffmanTable& dc_table,
+    const JpegHuffmanTable& ac_table,
+    std::string_view location)
+{
+    const std::uint8_t dc_bits = decode_jpeg_huffman_symbol(reader, dc_table, location);
+    if (dc_bits > 11U)
+        fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+             std::string(location), "baseline JPEG DC coefficient category exceeds 11 bits");
+    reader.discard_bits(dc_bits);
+
+    std::uint32_t coefficient = 1U;
+    while (coefficient <= 63U)
+    {
+        const std::uint8_t symbol = decode_jpeg_huffman_symbol(reader, ac_table, location);
+        const std::uint8_t zero_run = static_cast<std::uint8_t>(symbol >> 4U);
+        const std::uint8_t value_bits = static_cast<std::uint8_t>(symbol & 0x0FU);
+        if (value_bits == 0U)
+        {
+            if (zero_run == 0U) return;
+            if (zero_run != 15U)
+                fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                     std::string(location), "baseline JPEG AC zero-size symbol is invalid");
+            coefficient += 16U;
+            if (coefficient > 64U)
+                fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                     std::string(location), "baseline JPEG AC zero run exceeds the block boundary");
+            continue;
+        }
+        if (value_bits > 10U)
+            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                 std::string(location), "baseline JPEG AC coefficient category exceeds 10 bits");
+        coefficient += zero_run;
+        if (coefficient > 63U)
+            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                 std::string(location), "baseline JPEG AC run exceeds the block boundary");
+        reader.discard_bits(value_bits);
+        ++coefficient;
+    }
+}
+
+[[nodiscard]] const JpegFrameComponent* find_jpeg_component(
+    const JpegBaselineFrame& frame,
+    std::uint8_t id) noexcept
+{
+    for (std::size_t index = 0; index < frame.component_count; ++index)
+    {
+        if (frame.components[index].id == id) return &frame.components[index];
+    }
+    return nullptr;
+}
+
+void parse_jpeg_huffman_tables(
+    std::span<const std::byte> segment,
+    std::array<JpegHuffmanTable, 4>& dc_tables,
+    std::array<JpegHuffmanTable, 4>& ac_tables,
+    std::string_view location)
+{
+    std::size_t cursor = 0;
+    while (cursor < segment.size())
+    {
+        if (segment.size() - cursor < 17U)
+            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                 std::string(location), "JPEG DHT segment is truncated");
+        const std::uint8_t selector = static_cast<std::uint8_t>(segment[cursor++]);
+        const std::uint8_t table_class = static_cast<std::uint8_t>(selector >> 4U);
+        const std::uint8_t table_id = static_cast<std::uint8_t>(selector & 0x0FU);
+        if (table_class > 1U || table_id >= 4U)
+            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                 std::string(location), "JPEG DHT table class or identifier is invalid");
+
+        std::array<std::uint8_t, 16> counts{};
+        std::size_t symbol_count = 0;
+        for (std::size_t length = 0; length < counts.size(); ++length)
+        {
+            counts[length] = static_cast<std::uint8_t>(segment[cursor++]);
+            symbol_count += counts[length];
+        }
+        if (symbol_count == 0U || symbol_count > 256U || segment.size() - cursor < symbol_count)
+            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                 std::string(location), "JPEG DHT symbol payload is invalid or truncated");
+
+        JpegHuffmanTable table;
+        table.defined = true;
+        table.value_count = symbol_count;
+        table.minimum_code.fill(-1);
+        table.maximum_code.fill(-1);
+        table.value_offset.fill(0);
+        for (std::size_t symbol_index = 0; symbol_index < symbol_count; ++symbol_index)
+            table.values[symbol_index] = static_cast<std::uint8_t>(segment[cursor + symbol_index]);
+        cursor += symbol_count;
+
+        std::int32_t code = 0;
+        std::int32_t value_index = 0;
+        for (std::size_t length = 1; length <= 16U; ++length)
+        {
+            const std::int32_t count = counts[length - 1U];
+            const std::int32_t code_space = static_cast<std::int32_t>(1U << length);
+            if (code + count > code_space)
+                fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                     std::string(location), "JPEG DHT describes an oversubscribed Huffman tree");
+            if (count > 0)
+            {
+                table.minimum_code[length] = code;
+                table.maximum_code[length] = code + count - 1;
+                table.value_offset[length] = value_index;
+            }
+            code = (code + count) << 1;
+            value_index += count;
+        }
+
+        if (table_class == 0U) dc_tables[table_id] = table;
+        else ac_tables[table_id] = table;
+    }
+}
+
+[[nodiscard]] std::size_t find_next_jpeg_marker(
+    std::span<const std::byte> bytes,
+    std::size_t scan_start,
+    std::string_view location)
+{
+    std::size_t cursor = scan_start;
+    while (cursor < bytes.size())
+    {
+        if (bytes[cursor] != std::byte{0xFF})
+        {
+            ++cursor;
+            continue;
+        }
+        const std::size_t marker_offset = cursor;
+        ++cursor;
+        while (cursor < bytes.size() && bytes[cursor] == std::byte{0xFF}) ++cursor;
+        if (cursor >= bytes.size())
+            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                 std::string(location), "JPEG scan ends with an incomplete marker");
+        const std::uint8_t marker = static_cast<std::uint8_t>(bytes[cursor]);
+        if (marker == 0x00U)
+        {
+            ++cursor;
+            continue;
+        }
+        if (marker >= 0xD0U && marker <= 0xD7U)
+        {
+            ++cursor;
+            continue;
+        }
+        return marker_offset;
+    }
+    fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+         std::string(location), "JPEG scan does not terminate with a marker");
+}
+
+void validate_baseline_jpeg_entropy(
+    std::span<const std::byte> bytes,
+    std::string_view location)
+{
+    if (bytes.size() < 4U || bytes[0] != std::byte{0xFF} || bytes[1] != std::byte{0xD8}) return;
+
+    JpegBaselineFrame frame;
+    std::array<JpegHuffmanTable, 4> dc_tables{};
+    std::array<JpegHuffmanTable, 4> ac_tables{};
+    std::uint16_t restart_interval = 0;
+    std::size_t offset = 2U;
+
+    while (offset < bytes.size())
+    {
+        if (bytes[offset] != std::byte{0xFF})
+            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                 std::string(location), "JPEG marker prefix is missing outside entropy data");
+        while (offset < bytes.size() && bytes[offset] == std::byte{0xFF}) ++offset;
+        if (offset >= bytes.size())
+            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                 std::string(location), "JPEG terminates with an incomplete marker");
+        const std::uint8_t marker = static_cast<std::uint8_t>(bytes[offset++]);
+        if (marker == 0xD9U) return;
+        if (marker == 0xD8U || marker == 0x01U || (marker >= 0xD0U && marker <= 0xD7U)) continue;
+        if (offset + 2U > bytes.size())
+            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                 std::string(location), "JPEG segment length is truncated");
+        const std::uint16_t length = read_big_endian_u16(bytes, offset);
+        if (length < 2U || offset + length > bytes.size())
+            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                 std::string(location), "JPEG segment length is invalid");
+        const std::size_t payload_offset = offset + 2U;
+        const std::size_t payload_size = static_cast<std::size_t>(length - 2U);
+        const std::span<const std::byte> payload = bytes.subspan(payload_offset, payload_size);
+
+        if (marker == 0xC0U)
+        {
+            if (payload.size() < 6U)
+                fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                     std::string(location), "baseline JPEG frame header is truncated");
+            const std::uint8_t precision = static_cast<std::uint8_t>(payload[0]);
+            const std::uint8_t component_count = static_cast<std::uint8_t>(payload[5]);
+            if (component_count == 0U || component_count > frame.components.size() ||
+                payload.size() != 6U + static_cast<std::size_t>(component_count) * 3U)
+                fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                     std::string(location), "baseline JPEG frame component table is invalid");
+
+            frame.present = true;
+            frame.eight_bit = precision == 8U;
+            frame.height = read_big_endian_u16(payload, 1U);
+            frame.width = read_big_endian_u16(payload, 3U);
+            frame.component_count = component_count;
+            frame.maximum_horizontal_sampling = 1U;
+            frame.maximum_vertical_sampling = 1U;
+            for (std::size_t component_index = 0; component_index < frame.component_count; ++component_index)
+            {
+                const std::size_t component_offset = 6U + component_index * 3U;
+                JpegFrameComponent component;
+                component.id = static_cast<std::uint8_t>(payload[component_offset]);
+                const std::uint8_t sampling = static_cast<std::uint8_t>(payload[component_offset + 1U]);
+                component.horizontal_sampling = static_cast<std::uint8_t>(sampling >> 4U);
+                component.vertical_sampling = static_cast<std::uint8_t>(sampling & 0x0FU);
+                if (component.horizontal_sampling == 0U || component.horizontal_sampling > 4U ||
+                    component.vertical_sampling == 0U || component.vertical_sampling > 4U)
+                    fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                         std::string(location), "baseline JPEG sampling factor is outside the supported JPEG range");
+                frame.maximum_horizontal_sampling = std::max(frame.maximum_horizontal_sampling, component.horizontal_sampling);
+                frame.maximum_vertical_sampling = std::max(frame.maximum_vertical_sampling, component.vertical_sampling);
+                frame.components[component_index] = component;
+            }
+        }
+        else if (marker == 0xC2U)
+        {
+            // Progressive JPEG remains supported through the full decoder backend.  The
+            // project-owned entropy walk below is intentionally limited to sequential
+            // baseline scans because progressive refinement has different coefficient
+            // state semantics.  Container/marker validation and full pixel decode still
+            // apply to progressive files.
+            frame.present = false;
+        }
+        else if (marker == 0xC4U)
+        {
+            parse_jpeg_huffman_tables(payload, dc_tables, ac_tables, location);
+        }
+        else if (marker == 0xDDU)
+        {
+            if (payload.size() != 2U)
+                fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                     std::string(location), "JPEG DRI segment must contain exactly one restart interval");
+            restart_interval = read_big_endian_u16(payload, 0U);
+        }
+        else if (marker == 0xDAU)
+        {
+            if (payload.empty())
+                fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                     std::string(location), "JPEG SOS segment is truncated");
+            const std::uint8_t scan_component_count = static_cast<std::uint8_t>(payload[0]);
+            const std::size_t expected_payload_size = 1U + static_cast<std::size_t>(scan_component_count) * 2U + 3U;
+            if (scan_component_count == 0U || scan_component_count > 4U || payload.size() != expected_payload_size)
+                fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                     std::string(location), "JPEG SOS component table is invalid");
+
+            const std::size_t scan_start = offset + length;
+            if (!frame.present || !frame.eight_bit)
+            {
+                offset = find_next_jpeg_marker(bytes, scan_start, location);
+                continue;
+            }
+
+            const std::uint8_t spectral_start = static_cast<std::uint8_t>(payload[payload.size() - 3U]);
+            const std::uint8_t spectral_end = static_cast<std::uint8_t>(payload[payload.size() - 2U]);
+            const std::uint8_t approximation = static_cast<std::uint8_t>(payload[payload.size() - 1U]);
+            if (spectral_start != 0U || spectral_end != 63U || approximation != 0U)
+                fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                     std::string(location), "baseline JPEG SOS spectral parameters are invalid");
+
+            struct ScanComponent
+            {
+                const JpegFrameComponent* frame_component = nullptr;
+                const JpegHuffmanTable* dc_table = nullptr;
+                const JpegHuffmanTable* ac_table = nullptr;
+            };
+            std::array<ScanComponent, 4> scan_components{};
+            for (std::size_t scan_index = 0; scan_index < scan_component_count; ++scan_index)
+            {
+                const std::uint8_t component_id = static_cast<std::uint8_t>(payload[1U + scan_index * 2U]);
+                const std::uint8_t selectors = static_cast<std::uint8_t>(payload[2U + scan_index * 2U]);
+                const std::uint8_t dc_id = static_cast<std::uint8_t>(selectors >> 4U);
+                const std::uint8_t ac_id = static_cast<std::uint8_t>(selectors & 0x0FU);
+                if (dc_id >= dc_tables.size() || ac_id >= ac_tables.size())
+                    fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                         std::string(location), "JPEG SOS references an out-of-range Huffman table identifier");
+                const JpegFrameComponent* component = find_jpeg_component(frame, component_id);
+                if (component == nullptr)
+                    fail(ImportStatus::invalid_source, DiagnosticCode::invalid_image,
+                         std::string(location), "JPEG SOS references a component absent from the frame header");
+                scan_components[scan_index] = {component, &dc_tables[dc_id], &ac_tables[ac_id]};
+            }
+
+            std::uint64_t mcu_columns = 0;
+            std::uint64_t mcu_rows = 0;
+            if (scan_component_count > 1U)
+            {
+                mcu_columns = ceil_divide(frame.width, static_cast<std::uint64_t>(8U * frame.maximum_horizontal_sampling));
+                mcu_rows = ceil_divide(frame.height, static_cast<std::uint64_t>(8U * frame.maximum_vertical_sampling));
+            }
+            else
+            {
+                const JpegFrameComponent& component = *scan_components[0].frame_component;
+                mcu_columns = ceil_divide(static_cast<std::uint64_t>(frame.width) * component.horizontal_sampling,
+                                          static_cast<std::uint64_t>(8U * frame.maximum_horizontal_sampling));
+                mcu_rows = ceil_divide(static_cast<std::uint64_t>(frame.height) * component.vertical_sampling,
+                                       static_cast<std::uint64_t>(8U * frame.maximum_vertical_sampling));
+            }
+            const std::uint64_t mcu_count = mcu_columns * mcu_rows;
+            JpegEntropyReader reader(bytes, scan_start, location);
+            std::uint8_t expected_restart = 0U;
+            for (std::uint64_t mcu = 0; mcu < mcu_count; ++mcu)
+            {
+                for (std::size_t scan_index = 0; scan_index < scan_component_count; ++scan_index)
+                {
+                    const ScanComponent& component = scan_components[scan_index];
+                    const std::uint32_t blocks = scan_component_count > 1U
+                        ? static_cast<std::uint32_t>(component.frame_component->horizontal_sampling) *
+                          static_cast<std::uint32_t>(component.frame_component->vertical_sampling)
+                        : 1U;
+                    for (std::uint32_t block = 0; block < blocks; ++block)
+                        decode_baseline_jpeg_block(reader, *component.dc_table, *component.ac_table, location);
+                }
+                if (restart_interval != 0U && (mcu + 1U) % restart_interval == 0U && mcu + 1U < mcu_count)
+                {
+                    reader.consume_restart_marker(expected_restart);
+                    expected_restart = static_cast<std::uint8_t>((expected_restart + 1U) & 7U);
+                }
+            }
+            offset = reader.finish_scan();
+            continue;
+        }
+
+        offset += length;
+    }
+}
+
 [[nodiscard]] std::tuple<std::uint32_t, std::uint32_t, std::uint32_t> parse_image_metadata(
     std::span<const std::byte> bytes,
     std::string_view mime_hint,
@@ -1026,6 +1515,7 @@ void validate_mesh_attribute_accessor(const AccessorData& accessor,
 
     if (bytes.size() >= 4 && bytes[0] == std::byte{0xFF} && bytes[1] == std::byte{0xD8})
     {
+        validate_baseline_jpeg_entropy(bytes, location);
         std::size_t offset = 2;
         bool saw_frame = false;
         bool saw_scan = false;

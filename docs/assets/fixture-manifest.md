@@ -28,7 +28,7 @@ The corpus now contains 10 valid/degraded top-level fixtures and 25 invalid fixt
 - `instanced_tangents.gltf`: one mesh, two transformed instances, negative determinant, tangent signs;
 - `repaired_vectors.gltf`: explicit normal/tangent/quaternion repair diagnostics;
 - `corrupt_entropy_png.gltf`: valid PNG chunk framing but an invalid PNG zlib/DEFLATE stream header; rejected before backend-specific decoder permissiveness can admit it;
-- `corrupt_entropy_jpeg.gltf`: plausible JPEG marker structure but corrupt scan entropy;
+- `corrupt_entropy_jpeg.gltf`: plausible baseline JPEG marker structure but truncated/corrupt scan entropy; exercises the project-owned Huffman/MCU entropy validator rather than backend warning policy;
 - `zero_normal.gltf`, `zero_tangent.gltf`, `zero_quaternion.gltf`: gross invalid-vector rejection.
 
 Budget boundary and cumulative multi-image behavior use these small assets with constrained `ImportSettings`; no giant malicious payload is committed.

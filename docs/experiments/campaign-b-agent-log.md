@@ -55,3 +55,12 @@ Environment: Linux, GNU and Clang C++20 toolchains, no Win32/D3D12 runtime.
 - Hosted CI run.
 
 Those rows remain `BLOCKED` or `NOT RUN` in the acceptance matrix.
+
+## Windows malformed-image follow-up — 2026-08-20
+
+Developer-supplied VS2026 evidence is treated as **Level-2 diagnostic evidence** for this follow-up. The exact Windows build configured and compiled successfully, `Daedalus.Core` and `Daedalus.Scene` passed, and `Daedalus.Assets` failed only because Windows WIC accepted `invalid/corrupt_entropy_jpeg.gltf`. An earlier WIC-indexing attempt did not change that result and was removed rather than retained as ineffective validation.
+
+The repair moves the strictness boundary into project-owned code: baseline sequential JPEG scans are walked using their declared Huffman tables, sampling factors, expected MCU/block count, restart intervals, coefficient-category limits, and marker/padding boundaries before backend pixel decode. The existing PNG zlib-envelope guard remains. Progressive JPEG is still accepted through marker validation plus full backend pixel decode; the new strict Huffman/MCU walk intentionally applies only to baseline sequential scans.
+
+Validation performed by the coding agent for this follow-up: source-health PASS; GNU warnings-as-errors portable Debug and Release configure/build/CTest PASS; direct valid JPEG acceptance PASS; direct corrupt baseline-JPEG `--expect-failure` PASS with structured `invalid_image`. Windows/WIC execution of the patched archive remains required before B-16 can be changed from BLOCKED to PASS.
+

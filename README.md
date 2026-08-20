@@ -77,7 +77,7 @@ cmake --build --preset portable-release
 ctest --preset portable-release --output-on-failure
 ```
 
-Windows uses Windows Imaging Component behind the same `assets/ImageDecoder` contract; non-Windows portable builds use separately installed libpng/libjpeg. No image-decoder source is vendored, so the exact decoder implementations remain a documented build-environment dependency rather than part of the source ZIP.
+Windows uses Windows Imaging Component behind the same `assets/ImageDecoder` contract; non-Windows portable builds use separately installed libpng/libjpeg. Because WIC can recover from some malformed image streams without reporting an error, the importer also owns platform-independent PNG zlib-envelope validation and a strict baseline-JPEG Huffman/MCU entropy walk before backend decode. No image-decoder source is vendored, so the exact decoder implementations remain a documented build-environment dependency rather than part of the source ZIP.
 
 ## Asset validator
 

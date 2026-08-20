@@ -32,7 +32,7 @@ ctest --preset portable-release --output-on-failure -V
 | B-13 | Bounds | PASS | Decoded bounds, stale min/max repair, multi-instance world bounds. | Yes | Visual bounds overlay update blocked under B-20. |
 | B-14 | Import report | PASS | Deterministic JSON, resource counters, diagnostics, human summary. | Yes | None. |
 | B-15 | Deterministic identity | PASS | Repeated/location/dependency/settings tests. | Yes | Persistent cache remains out of scope. |
-| B-16 | Malformed-input handling | PASS | Full PNG/JPEG decode, resource budgets, vector/quaternion repair/rejection, 25 invalid fixtures. | Yes | Decoder backends differ by platform but share one contract; portable decoder source is system-supplied rather than vendored. |
+| B-16 | Malformed-input handling | BLOCKED | Portable full PNG/JPEG decode and all 25 invalid fixtures pass after adding project-owned PNG zlib and baseline-JPEG Huffman/MCU validation. Developer Windows evidence showed WIC accepted the malformed baseline-JPEG fixture before this patch. | No updated Windows run | Re-run `Daedalus.Assets` and the direct corrupt-JPEG validator on the exact patched source under VS2026/WIC. |
 | B-17 | Controlled fixture corpus | PASS | Generator reproducibility; 10 valid/degraded and 25 invalid assets; CC0. | Yes | None. |
 | B-18 | Portable CPU tests | PASS | CTest: Core 9, Scene 7, Assets 17; GNU Debug/Release, Clang Release, and ASan+UBSan Debug. | Yes | GPU tests separate by design. |
 | B-19 | GPU staging upload | BLOCKED | Existing source uses default heaps, explicit upload/copy/barriers/fences; historical pre-closure hardware/WARP runs passed. | No updated Windows run | Full image ownership changed; exact closure snapshot must be run on Windows. |
