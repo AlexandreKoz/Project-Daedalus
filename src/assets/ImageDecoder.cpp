@@ -72,7 +72,7 @@ private:
     HRESULT result_ = E_FAIL;
 };
 
-[[nodiscard]] DecodedImage decode_wic(std::span<const std::byte> encoded, std::string_view mime_type)
+[[nodiscard]] DecodedImage decode_wic(std::span<const std::byte> encoded)
 {
     ScopedComInitialization com;
     if (encoded.empty() || encoded.size() > static_cast<std::size_t>(std::numeric_limits<DWORD>::max()))
@@ -365,7 +365,7 @@ DecodedImage decode_image_rgba8(std::span<const std::byte> encoded, std::string_
     if (mime_type != "image/png" && mime_type != "image/jpeg")
         throw ImageDecodeError("unsupported image MIME type: " + std::string(mime_type));
 #if defined(_WIN32)
-    return decode_wic(encoded, mime_type);
+    return decode_wic(encoded);
 #else
     return mime_type == "image/png" ? decode_png(encoded) : decode_jpeg(encoded);
 #endif
