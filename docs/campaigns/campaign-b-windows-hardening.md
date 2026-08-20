@@ -61,3 +61,13 @@ GitHub Actions runs this preflight on Ubuntu and Windows before configure/build.
 ## Still requiring developer-side Windows evidence
 
 This environment cannot execute MSVC/DXC/D3D12. The repaired snapshot must still be configured and built on VS2026/v145 and then run on hardware and WARP. In particular, verify that MSVC no longer reports C4003/C2589 in `ImageDecoder.cpp` or C4324 for the diagnostic constant contract, then continue the Campaign B hardware/WARP/stress/live-object acceptance matrix.
+
+## Final Windows closure follow-up — 2026-08-20
+
+Developer execution of the strict-image-validation snapshot passed VS2026 Debug/Release CTest, hardware/WARP rendering, diagnostic modes, camera use, and 100-cycle reload/resize stress. The run exposed three final plumbing defects that are repaired in the current source:
+
+- `DXGIGetDebugInterface1` is now called through the DXGI 1.3 API instead of being incorrectly searched in `dxgidebug.dll`;
+- `Application::shutdown()` is idempotent, preventing the destructor from requesting a second live-object report after normal shutdown;
+- relative `run.ps1 -ImportReport` and explicit relative `package-source.ps1 -OutputPath` values resolve against the PowerShell caller directory rather than the host process environment directory.
+
+`source-health.py` guards these contracts. The exact final archive still requires one Windows Debug rebuild/live-object debugger inspection before B-24/B-25 can be promoted.

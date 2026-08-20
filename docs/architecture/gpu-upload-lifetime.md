@@ -22,3 +22,8 @@ These source-level contracts still require Windows compilation, DirectX debug-la
 `--stress-reloads N` waits for GPU idle, destroys the renderer, reparses/revalidates the source, recreates default-heap geometry/textures and descriptors, and repeats. `--stress-alternate-asset` alternates two real assets. `--stress-resize` queues small/large/minimized/restored/maximized/restored window states through the real Win32 and swap-chain path. These modes are acceptance tools, not a streaming architecture.
 
 `--report-live-objects` requests a Debug DXGI report only after renderer, D3D12 context, and window resources have been released. It logs explicit begin/end markers. The report output must still be inspected in the debugger; the application does not claim it can reliably classify every runtime-internal DXGI object programmatically.
+
+
+## Windows live-object acquisition follow-up
+
+`DXGIGetDebugInterface1` is obtained through the linked DXGI 1.3 API, not by searching `dxgidebug.dll` for that symbol. The application releases renderer/context/window resources first, requests the DXGI report once, and uses an idempotent shutdown guard so destructor entry cannot duplicate the report. The detailed D3D12/DXGI object listing is still debugger output and must be inspected during acceptance; a successful API return alone is not treated as proof of zero unexpected live objects.

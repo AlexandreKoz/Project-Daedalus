@@ -305,6 +305,12 @@ void Application::initialize()
 
 void Application::shutdown() noexcept
 {
+    if (shutdown_complete_)
+    {
+        return;
+    }
+    shutdown_complete_ = true;
+
     const bool gpu_idle = graphics_ == nullptr || graphics_->prepare_for_shutdown();
     bool resources_abandoned = false;
 

@@ -64,3 +64,34 @@ The repair moves the strictness boundary into project-owned code: baseline seque
 
 Validation performed by the coding agent for this follow-up: source-health PASS; GNU warnings-as-errors portable Debug and Release configure/build/CTest PASS; direct valid JPEG acceptance PASS; direct corrupt baseline-JPEG `--expect-failure` PASS with structured `invalid_image`. Windows/WIC execution of the patched archive remains required before B-16 can be changed from BLOCKED to PASS.
 
+
+## Windows runtime closure evidence — 2026-08-20
+
+Developer-supplied Level-2 evidence established on the strict-JPEG-v2 predecessor:
+
+- source-health PASS;
+- VS2026 Debug configure/build/DXC/CTest 3/3 PASS;
+- direct malformed baseline-JPEG expected-failure PASS with structured `invalid_image`;
+- RTX 4060 Ti Debug smoke PASS;
+- explicit WARP Debug smoke PASS;
+- all five diagnostic modes (`shaded`, `normals`, `uv`, `tangents`, `bounds`) executed on RTX and WARP;
+- visual captures supplied for UV1, tangent instances and aggregate bounds;
+- developer confirmed interactive orbit/pan/dolly/reframe behavior;
+- 100 alternating reloads plus resize/minimize/restore/maximize stress completed on hardware and WARP;
+- VS2026 Release configure/build/DXC/CTest 3/3 PASS plus hardware/WARP representative smoke.
+
+The same evidence exposed validation-plumbing defects rather than renderer/importer defects:
+
+1. DXGI live-object acquisition searched `DXGIGetDebugInterface1` in `dxgidebug.dll`, so the DXGI report was unavailable.
+2. `run.ps1 -ImportReport .\...` used the .NET process current directory and wrote under the Visual Studio shell directory rather than the PowerShell caller location.
+3. Explicit shutdown followed by the `Application` destructor could request the DXGI report a second time.
+
+Final source repair:
+
+- call `DXGIGetDebugInterface1` directly through the existing `dxgi` link;
+- make `Application::shutdown()` idempotent;
+- resolve PowerShell output paths relative to the invocation directory;
+- apply the same explicit-relative-path rule to `package-source.ps1`;
+- extend `source-health.py` with regression sentinels.
+
+Portable validation after these changes: source-health PASS; GNU warnings-as-errors Debug and Release configure/build/CTest 3/3 PASS. Windows execution of the final DXGI/shutdown delta remains required before B-24/B-25 can be promoted. Hosted CI remains NOT RUN.

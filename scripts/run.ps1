@@ -22,6 +22,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+$InvocationDirectory = (Get-Location).Path
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $BuildPrefix = if ($VisualStudioVersion -eq "2026") { "windows-vs2026" } else { "windows-msvc" }
 $BuildFolder = "$BuildPrefix-$($Configuration.ToLowerInvariant())"
@@ -41,12 +42,19 @@ if ($ImportReport -and -not $Asset) { throw "ImportReport requires Asset." }
 if ($StressAlternateAsset -and -not $Asset) { throw "StressAlternateAsset requires Asset." }
 if ($StressAlternateAsset -and $StressReloads -eq 0) { throw "StressAlternateAsset requires StressReloads." }
 
+function Resolve-OutputPath([string]$Path, [string]$BaseDirectory) {
+    if ([System.IO.Path]::IsPathFullyQualified($Path)) {
+        return [System.IO.Path]::GetFullPath($Path)
+    }
+    return [System.IO.Path]::GetFullPath((Join-Path $BaseDirectory $Path))
+}
+
 $Arguments = @("--diagnostic", $Diagnostic)
 if ($Warp) { $Arguments += "--warp" }
 if ($Frames -gt 0) { $Arguments += @("--frames", $Frames.ToString()) }
 if ($Asset) { $Arguments += @("--asset", (Resolve-Path $Asset).Path) }
 if ($Scene) { $Arguments += @("--scene", $Scene) }
-if ($ImportReport) { $Arguments += @("--import-report", [System.IO.Path]::GetFullPath($ImportReport)) }
+if ($ImportReport) { $Arguments += @("--import-report", (Resolve-OutputPath $ImportReport $InvocationDirectory)) }
 if ($DumpScene) { $Arguments += "--dump-scene" }
 if ($StressReloads -gt 0) { $Arguments += @("--stress-reloads", $StressReloads.ToString()) }
 if ($StressAlternateAsset) { $Arguments += @("--stress-alternate-asset", (Resolve-Path $StressAlternateAsset).Path) }

@@ -60,6 +60,27 @@ def main() -> int:
     for token in ["tangents", "StressReloads", "StressAlternateAsset", "StressResize", "ReportLiveObjects", "NoErrorDialog"]:
         if token not in run_script:
             fail(f"scripts/run.ps1 does not expose {token}", failures)
+    for token in ["$InvocationDirectory = (Get-Location).Path", "Resolve-OutputPath $ImportReport $InvocationDirectory"]:
+        if token not in run_script:
+            fail(f"scripts/run.ps1 missing caller-relative output-path guard: {token}", failures)
+    if "GetFullPath($ImportReport)" in run_script:
+        fail("scripts/run.ps1 resolves ImportReport through process CWD instead of the PowerShell caller directory", failures)
+
+    package_script = (ROOT / "scripts/package-source.ps1").read_text(encoding="utf-8")
+    for token in ["$InvocationDirectory = (Get-Location).Path", "IsPathFullyQualified($OutputPath)", "Join-Path $InvocationDirectory $OutputPath"]:
+        if token not in package_script:
+            fail(f"scripts/package-source.ps1 missing caller-relative output-path guard: {token}", failures)
+
+    # Guard the post-teardown DXGI path: DXGIGetDebugInterface1 is exported by dxgi.dll, not dxgidebug.dll.
+    d3d12_context = (ROOT / "src/graphics/D3D12Context.cpp").read_text(encoding="utf-8")
+    if "DXGIGetDebugInterface1(0, IID_PPV_ARGS(&debug))" not in d3d12_context:
+        fail("D3D12Context.cpp is missing the direct DXGIGetDebugInterface1 live-object path", failures)
+    if 'GetProcAddress(module, "DXGIGetDebugInterface1")' in d3d12_context or 'LoadLibraryW(L"dxgidebug.dll")' in d3d12_context:
+        fail("D3D12Context.cpp contains the obsolete/wrong dynamic DXGIGetDebugInterface1 lookup", failures)
+
+    application = (ROOT / "src/Application.cpp").read_text(encoding="utf-8")
+    if "if (shutdown_complete_)" not in application:
+        fail("Application.cpp is missing idempotent shutdown protection", failures)
 
     # Catch orphaned implementation files: dead .cpp files silently rot because no compiler ever sees them.
     cmake_text = "\n".join(p.read_text(encoding="utf-8") for p in ROOT.rglob("CMakeLists.txt"))

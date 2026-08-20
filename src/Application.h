@@ -49,5 +49,6 @@ private:
     std::unique_ptr<DiagnosticSceneRenderer> renderer_;
     bool com_initialized_ = false;
     bool initialized_ = false;
+    bool shutdown_complete_ = false;
 };
 }

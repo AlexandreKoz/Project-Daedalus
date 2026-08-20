@@ -6,10 +6,14 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+$InvocationDirectory = (Get-Location).Path
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $RepositoryParent = Split-Path -Parent $RepositoryRoot
 if (-not $OutputPath) {
     $OutputPath = Join-Path $RepositoryParent "Project-Daedalus-Campaign-B-audit-closure-source.zip"
+}
+elseif (-not [System.IO.Path]::IsPathFullyQualified($OutputPath)) {
+    $OutputPath = Join-Path $InvocationDirectory $OutputPath
 }
 $OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
 $CanonicalRoot = "Project-Daedalus"

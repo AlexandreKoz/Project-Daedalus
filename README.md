@@ -136,6 +136,6 @@ After removing generated directories, the canonical delivery command is:
 python3 scripts/package-source.py --output ../Project-Daedalus-Campaign-B-audit-closure-source.zip
 ```
 
-The Windows companion is `scripts/package-source.ps1`. The canonical Python packaging script creates sorted entries beneath `Project-Daedalus/`, applies a fixed `2000-01-01T00:00:00Z` ZIP timestamp, and rejects build trees, binaries, DXIL/PDBs, logs, IDE state, caches, nested archives, secrets, and restricted SDK material.
+The Windows companion is `scripts/package-source.ps1`. The canonical Python packaging script creates sorted entries beneath `Project-Daedalus/`, applies a fixed `2000-01-01T00:00:00Z` ZIP timestamp, and rejects build trees, binaries, DXIL/PDBs, logs, IDE state, caches, nested archives, secrets, and restricted SDK material. Explicitly relative PowerShell output paths are resolved against the caller's current PowerShell directory rather than the host process environment directory.
 
 See `docs/campaigns/campaign-b-acceptance.md`, `docs/campaigns/campaign-b-adversarial-audit.md`, and `docs/handoffs/campaign-c-handoff.md` for exact evidence and limitations.

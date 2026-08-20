@@ -1,6 +1,7 @@
 #include "graphics/D3D12Context.h"
 
 #include <d3d12sdklayers.h>
+#include <dxgi1_3.h>
 #include <dxgidebug.h>
 
 #include "core/Error.h"
@@ -698,32 +699,16 @@ bool D3D12Context::report_live_objects() noexcept
 {
 #if defined(DAEDALUS_DEBUG_BUILD)
     Log::info("DXGI live-object report begin (application graphics resources already released)");
-    HMODULE module = LoadLibraryW(L"dxgidebug.dll");
-    if (module == nullptr)
-    {
-        Log::warning("DXGI live-object report unavailable: dxgidebug.dll could not be loaded");
-        return false;
-    }
-    using GetDebugInterface = HRESULT(WINAPI*)(UINT, REFIID, void**);
-    const auto get_debug_interface = reinterpret_cast<GetDebugInterface>(GetProcAddress(module, "DXGIGetDebugInterface1"));
-    if (get_debug_interface == nullptr)
-    {
-        Log::warning("DXGI live-object report unavailable: DXGIGetDebugInterface1 was not found");
-        FreeLibrary(module);
-        return false;
-    }
     Microsoft::WRL::ComPtr<IDXGIDebug1> debug;
-    const HRESULT acquire = get_debug_interface(0, IID_PPV_ARGS(&debug));
+    const HRESULT acquire = DXGIGetDebugInterface1(0, IID_PPV_ARGS(&debug));
     if (FAILED(acquire))
     {
         Log::error(format_failure_message(static_cast<ResultCode>(acquire), "DXGIGetDebugInterface1"));
-        FreeLibrary(module);
         return false;
     }
     const HRESULT report = debug->ReportLiveObjects(
         DXGI_DEBUG_ALL, static_cast<DXGI_DEBUG_RLO_FLAGS>(DXGI_DEBUG_RLO_DETAIL | DXGI_DEBUG_RLO_IGNORE_INTERNAL));
     debug.Reset();
-    FreeLibrary(module);
     if (FAILED(report))
     {
         Log::error(format_failure_message(static_cast<ResultCode>(report), "IDXGIDebug1::ReportLiveObjects"));
