@@ -1,7 +1,7 @@
 #include "TestHarness.h"
 #include "assets/GltfImporter.h"
 #include "core/Json.h"
-#include "rendering/DiagnosticPreparation.h"
+#include "rendering/RasterPreparation.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -163,7 +163,7 @@ void test_default_material_semantics()
     require_near(result.scene.materials[0].base_color_factor.x, 1.0F, 1.0e-6F, "explicit red material red channel");
     require_near(result.scene.materials[0].base_color_factor.y, 0.0F, 1.0e-6F, "explicit red material green channel");
     require_near(result.scene.default_material.base_color_factor.x, 1.0F, 1.0e-6F, "glTF default material factor");
-    const auto draws = prepare_diagnostic_draws(result.scene);
+    const auto draws = prepare_raster_draws(result.scene);
     require(draws.size() == 2, "both primitives must prepare draws");
     require(!draws[0].uses_default_material && draws[1].uses_default_material,
             "runtime preparation must distinguish source and default materials");
@@ -177,9 +177,9 @@ void test_uv1_runtime_selection()
             "UV1 fixture must contain both UV sets");
     require(result.scene.materials[0].base_color_texture.has_value(), "UV1 fixture base texture");
     require(result.scene.materials[0].base_color_texture->texcoord_set == 1, "importer must preserve texCoord 1");
-    const auto draws = prepare_diagnostic_draws(result.scene);
+    const auto draws = prepare_raster_draws(result.scene);
     require(draws.size() == 1, "UV1 fixture draw count");
-    require(draws[0].texture_coord_set == 1 && draws[0].selected_texcoord_available,
+    require(draws[0].base_color.texcoord_set == 1 && draws[0].base_color.texture.has_value(),
             "runtime preparation must select available UV1 rather than silently substituting UV0");
     require_near(result.scene.primitives[0].vertices[0].texcoord0.x, 0.0F, 1.0e-6F, "UV0 control value");
     require_near(result.scene.primitives[0].vertices[1].texcoord1.x, 1.0F, 1.0e-6F, "UV1 independent value");
@@ -191,7 +191,7 @@ void test_instancing_and_tangent_preparation()
     require(result.succeeded(), result.report.summary());
     require(result.scene.meshes.size() == 1 && result.scene.primitives.size() == 1 && result.scene.nodes.size() == 2,
             "fixture must retain one mesh with two instances");
-    const auto draws = prepare_diagnostic_draws(result.scene);
+    const auto draws = prepare_raster_draws(result.scene);
     require(draws.size() == 2, "two mesh-bearing nodes must produce two draws");
     require(draws[0].primitive_index == draws[1].primitive_index, "instances must share the same canonical primitive");
     require_near(draws[0].world.at(0, 3), -1.0F, 1.0e-6F, "left instance translation");
@@ -368,6 +368,77 @@ void test_report_json_is_parseable()
     require(report.find("diagnostics") != nullptr, "report must contain diagnostics");
 }
 
+
+void test_campaign_c1_fixture_semantics()
+{
+    const ImportResult base = load("valid/c1_base_color_factor.gltf");
+    require(base.succeeded(), base.report.summary());
+    require(base.scene.materials.size() == 1 && base.scene.primitives[0].has_colors, "base-color fixture must preserve factor and vertex colors");
+    require_near(base.scene.materials[0].base_color_factor.x, 0.25F, 1.0e-6F, "base factor fixture R");
+
+    const ImportResult srgb = load("valid/c1_srgb_base_color.gltf");
+    require(srgb.succeeded(), srgb.report.summary());
+    require(srgb.scene.textures[0].color_space == ColorSpaceIntent::srgb, "base-color fixture must classify texture as sRGB");
+    require(std::to_integer<unsigned char>(srgb.scene.images[0].decoded_rgba8[0]) == 128U, "sRGB fixture red payload must remain deterministic RGBA8");
+    require(std::to_integer<unsigned char>(srgb.scene.images[0].decoded_rgba8[3]) == 192U, "sRGB fixture alpha payload must remain independent");
+
+    const ImportResult mr = load("valid/c1_metallic_roughness.gltf");
+    require(mr.succeeded(), mr.report.summary());
+    require(mr.scene.textures[0].color_space == ColorSpaceIntent::linear, "metallic-roughness fixture must classify texture as linear");
+    require(std::to_integer<unsigned char>(mr.scene.images[0].decoded_rgba8[1]) == 64U, "roughness proof must occupy G");
+    require(std::to_integer<unsigned char>(mr.scene.images[0].decoded_rgba8[2]) == 192U, "metallic proof must occupy B");
+    require_near(mr.scene.materials[0].roughness_factor, 0.4F, 1.0e-6F, "roughness factor fixture");
+    require_near(mr.scene.materials[0].metallic_factor, 0.8F, 1.0e-6F, "metallic factor fixture");
+
+    const ImportResult normal = load("valid/c1_normal_map.gltf");
+    require(normal.succeeded(), normal.report.summary());
+    require(normal.scene.primitives[0].has_tangents, "normal fixture must supply tangent basis");
+    require(normal.scene.textures[0].color_space == ColorSpaceIntent::linear, "normal texture must be linear");
+    require_near(normal.scene.materials[0].normal_scale, 0.5F, 1.0e-6F, "normal scale fixture");
+
+    const ImportResult handed = load("valid/c1_tangent_negative_scale.gltf");
+    require(handed.succeeded(), handed.report.summary());
+    require(handed.scene.nodes.size() == 2 && !handed.scene.nodes[0].negative_determinant && handed.scene.nodes[1].negative_determinant,
+            "handedness fixture must expose both determinant signs");
+    require_near(handed.scene.primitives[0].vertices[1].tangent.w, -1.0F, 1.0e-6F, "handedness fixture must preserve source tangent w");
+
+    const ImportResult emissive = load("valid/c1_emissive.gltf");
+    require(emissive.succeeded(), emissive.report.summary());
+    require(emissive.scene.textures[0].color_space == ColorSpaceIntent::srgb, "emissive texture must be sRGB");
+    require_near(emissive.scene.materials[0].emissive_factor.y, 1.0F, 1.0e-6F, "emissive factor fixture");
+
+    const ImportResult ao = load("valid/c1_occlusion.gltf");
+    require(ao.succeeded(), ao.report.summary());
+    require(ao.scene.textures[0].color_space == ColorSpaceIntent::linear, "AO texture must be linear");
+    require(std::to_integer<unsigned char>(ao.scene.images[0].decoded_rgba8[0]) == 64U, "AO proof must occupy R");
+    require_near(ao.scene.materials[0].occlusion_strength, 0.6F, 1.0e-6F, "AO strength fixture");
+
+    const ImportResult alpha = load("valid/c1_alpha_modes.gltf");
+    require(alpha.succeeded(), alpha.report.summary());
+    require(alpha.scene.materials.size() == 4, "alpha fixture material count");
+    require(alpha.scene.materials[0].alpha_mode == AlphaMode::opaque && alpha.scene.materials[1].alpha_mode == AlphaMode::mask &&
+            alpha.scene.materials[2].alpha_mode == AlphaMode::mask && alpha.scene.materials[3].alpha_mode == AlphaMode::blend,
+            "alpha fixture must expose OPAQUE, MASK below/above and BLEND");
+    require(std::to_integer<unsigned char>(alpha.scene.images[0].decoded_rgba8[3]) < 128U &&
+            std::to_integer<unsigned char>(alpha.scene.images[1].decoded_rgba8[3]) > 128U,
+            "alpha mask fixtures must straddle cutoff");
+
+    const ImportResult double_sided = load("valid/c1_double_sided.gltf");
+    require(double_sided.succeeded(), double_sided.report.summary());
+    require(double_sided.scene.materials[0].double_sided, "double-sided fixture flag");
+
+    for (const auto& [path, type] : std::array{
+             std::pair{std::string_view("valid/c1_directional_light.gltf"), LightType::directional},
+             std::pair{std::string_view("valid/c1_point_light.gltf"), LightType::point},
+             std::pair{std::string_view("valid/c1_spot_light.gltf"), LightType::spot}})
+    {
+        const ImportResult light = load(path);
+        require(light.succeeded(), light.report.summary());
+        require(light.scene.lights.size() == 1 && light.scene.lights[0].type == type, "punctual fixture light type");
+        require(prepare_punctual_lights(light.scene).size() == 1, "punctual fixture must reach renderer-neutral preparation");
+    }
+}
+
 void test_invalid_fixtures()
 {
     struct ExpectedFailure
@@ -437,5 +508,6 @@ int main()
         {"declared bounds audit", test_declared_bounds_are_audited},
         {"resource limit status", test_resource_limit_status},
         {"report JSON", test_report_json_is_parseable},
+        {"Campaign C1 fixture semantics", test_campaign_c1_fixture_semantics},
         {"invalid fixtures", test_invalid_fixtures}});
 }

@@ -16,7 +16,12 @@ enum class DiagnosticMode
     normals,
     uv,
     tangents,
-    bounds
+    bounds,
+    base_color,
+    metallic,
+    roughness,
+    emissive,
+    material_id
 };
 
 struct CommandLineOptions
@@ -34,6 +39,7 @@ struct CommandLineOptions
     std::optional<std::filesystem::path> import_report_path;
     std::optional<std::filesystem::path> stress_alternate_asset_path;
     DiagnosticMode diagnostic_mode = DiagnosticMode::shaded;
+    float exposure_ev = 0.0F;
 };
 
 class CommandLineError final : public std::runtime_error

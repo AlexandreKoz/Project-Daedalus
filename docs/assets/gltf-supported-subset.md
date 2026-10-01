@@ -1,38 +1,51 @@
 # glTF 2.0 supported subset
 
-## Accepted
+## Canonical ingestion accepted
 
 - JSON `.gltf` and binary `.glb` version 2.
-- One JSON chunk and an optional BIN chunk in GLB.
-- External relative URIs, strict base64 or percent-decoded data URIs, GLB buffers, and image bufferViews.
-- PNG and baseline/progressive JPEG payloads in the declared source-component subset. Import first validates container/marker metadata, then performs a full assets-layer pixel decode before success and stores owned top-left-origin RGBA8 pixels in the canonical image. Windows uses WIC and non-Windows builds use libpng/libjpeg behind the same project-owned contract. PNG zlib framing is validated by the importer before backend decode, and baseline sequential JPEG scans receive a platform-independent Huffman/MCU entropy walk before backend decode. This prevents decoder-specific permissiveness from admitting the controlled malformed PNG/JPEG fixtures; progressive JPEG still relies on full backend pixel decode after marker validation. Corrupt image data is reported as structured `invalid_image`, not deferred to renderer construction.
+- External relative, data-URI, GLB-buffer, and image-bufferView resources under the documented security/path policy.
+- PNG and supported JPEG payloads fully decoded by the assets layer before import success into owned top-left RGBA8 canonical pixels.
 - Multiple scenes, roots, nodes, meshes, triangle primitives, materials, textures, images, samplers, cameras, and punctual lights.
-- Accessor component types BYTE, UNSIGNED_BYTE, SHORT, UNSIGNED_SHORT, UNSIGNED_INT, and FLOAT; normalized integer conversion; tightly packed and interleaved data.
-- `POSITION`, `NORMAL`, `TANGENT`, `TEXCOORD_0`, `TEXCOORD_1`, and VEC3/VEC4 `COLOR_0` under glTF semantic/type/component rules.
-- `KHR_mesh_quantization` when declared in both `extensionsUsed` and `extensionsRequired`; integer mesh attributes that require this extension are rejected without that declaration.
-- Explicit or generated sequential indices; 8/16/32-bit source indices become canonical 32-bit indices.
-- Core metallic-roughness factors and texture references, normal scale, occlusion strength, emissive, alpha metadata, and double-sided metadata, with schema-range and finite-value checks.
-- Perspective and orthographic cameras.
+- BYTE/UNSIGNED_BYTE/SHORT/UNSIGNED_SHORT/UNSIGNED_INT/FLOAT accessors where allowed by the declared semantic; normalized integer conversion and supported interleaving.
+- `POSITION`, `NORMAL`, `TANGENT`, `TEXCOORD_0`, `TEXCOORD_1`, and VEC3/VEC4 `COLOR_0` under the repository's validated schema rules.
+- `KHR_mesh_quantization` only when declared consistently with the source use.
+- Explicit or generated sequential indices; canonical indices are 32-bit.
+- Core metallic-roughness factors and texture references, normal scale, occlusion strength, emissive, alpha metadata, and double-sided metadata.
+- Perspective/orthographic cameras.
 - `KHR_lights_punctual` directional, point, and spot metadata.
 
-## Rejected or warned
+## Campaign C1 raster consumption
 
-- Sparse accessors: unsupported and rejected.
-- Primitive modes other than TRIANGLES: rejected.
-- Unknown required extensions: rejected; unknown optional extensions: inventoried and warned.
-- `KHR_texture_transform`: reported as unsupported; transformation is not silently treated as equivalent.
-- Network/drive/absolute URIs, backslashes, path traversal outside the asset root, encoded NUL, malformed strict base64, invalid references/ranges/strides, non-finite values, invalid indices, malformed graphs, and unsupported or structurally invalid images: rejected.
-- Source accessor `min`/`max` are audited but never trusted. A mismatch produces a deterministic repair diagnostic and recomputed bounds.
-- Degenerate triangles, missing optional normals/tangents, singular transforms, and deterministic defaults remain visible through structured diagnostics.
+The production forward raster path consumes the canonical core metallic-roughness subset as follows:
 
-## Not implemented
+- base colour factor × sRGB base-colour texture × vertex colour;
+- roughness from metallic-roughness **G**, metallic from **B**, both linear-data sampled and factor-scaled;
+- tangent-space normal map sampled as linear data, including normal scale, source tangent sign, negative world determinant, inverse-transpose normal transform, and double-sided face handling;
+- emissive factor × sRGB emissive texture, independent of direct-light multiplication;
+- occlusion from linear-data **R** with strength, applied only to C1's provisional indirect term;
+- OPAQUE, MASK/alphaCutoff, and straight-alpha BLEND with deterministic object-level sorting;
+- `doubleSided` raster/shading behavior;
+- directional, point, and spot punctual direct lighting with canonical glTF local -Z orientation.
 
-Animation, skins, morph targets, sparse accessors, Draco/meshopt compression, KTX/Basis, material extensions, texture transforms, mip generation, colour-profile conversion, alpha rendering, and complete extension coverage belong to later work.
+The canonical default-material sentinel remains distinct from source material index 0.
 
-## Audit-closure clarifications
+## Rejected or warned during ingestion
 
-- Omitted primitive material uses the glTF default material, never source material 0.
-- Base-colour, metallic-roughness, normal, occlusion, and emissive references preserve `texCoord` 0 or 1. A referenced set absent from a primitive is an `invalid_source` / `missing_texture_coordinate` error.
-- PNG/JPEG acceptance requires full decode to RGBA8 before import success. Structurally plausible but undecodable entropy is `invalid_image`.
-- Slight unit-length deviations up to 0.01 for normals, tangent XYZ, and rotation quaternions may be normalized with explicit repair diagnostics. Zero, non-finite, or larger deviations are rejected.
-- Sparse accessors and texture transforms remain unsupported.
+- sparse accessors: unsupported/rejected;
+- primitive modes other than TRIANGLES: rejected;
+- unknown required extensions: rejected; unknown optional extensions: inventoried/warned;
+- `KHR_texture_transform`: reported unsupported rather than silently approximated;
+- network/drive/absolute/backslash/path-traversal URIs, encoded NUL, malformed strict base64, invalid references/ranges/strides, non-finite values, invalid indices, malformed graphs, and invalid/unsupported images: rejected;
+- accessor min/max is audited but decoded bounds are authoritative;
+- degenerate triangles, missing optional normals/tangents, and singular transforms remain visible through structured diagnostics under the documented policies.
+
+## Not implemented / not claimed
+
+- animation, skins, morph targets, sparse accessors, Draco/meshopt, KTX/Basis, `KHR_texture_transform`, or broad material-extension support;
+- mip generation: C1 uploads one mip and clamps sampler LOD to zero, therefore full glTF mip-filter fidelity is not claimed;
+- derivative normal-map basis fallback when source tangents are missing;
+- shadows and image-based lighting (Campaign C2);
+- weighted OIT or exact intersecting-transparency resolution;
+- full colour-profile management beyond the declared sRGB/linear material-slot contract.
+
+See `docs/architecture/pbr-material-and-lighting-contract.md` for the exact C1 shading equations and limitations.

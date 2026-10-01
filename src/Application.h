@@ -11,7 +11,7 @@ namespace daedalus
 {
 class Win32Window;
 class D3D12Context;
-class DiagnosticSceneRenderer;
+class PbrSceneRenderer;
 
 class Application final
 {
@@ -46,7 +46,7 @@ private:
     bool alternate_asset_active_ = false;
     std::unique_ptr<Win32Window> window_;
     std::unique_ptr<D3D12Context> graphics_;
-    std::unique_ptr<DiagnosticSceneRenderer> renderer_;
+    std::unique_ptr<PbrSceneRenderer> renderer_;
     bool com_initialized_ = false;
     bool initialized_ = false;
     bool shutdown_complete_ = false;

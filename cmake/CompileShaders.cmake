@@ -46,6 +46,7 @@ function(daedalus_compile_shader_pair target_name shader_source output_directory
     daedalus_find_dxc(_dxc)
     message(STATUS "Using DirectX Shader Compiler: ${_dxc}")
 
+    get_filename_component(_shader_include_directory "${shader_source}" DIRECTORY)
     set(_configuration_output_directory "${output_directory}/$<CONFIG>")
     set(_vertex_output "${_configuration_output_directory}/${vertex_filename}")
     set(_pixel_output "${_configuration_output_directory}/${pixel_filename}")
@@ -55,11 +56,12 @@ function(daedalus_compile_shader_pair target_name shader_source output_directory
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_configuration_output_directory}"
         COMMAND "${_dxc}"
             -nologo -WX -HV 2021 -T vs_6_0 -E VSMain
+            -I "${_shader_include_directory}"
             "$<$<CONFIG:Debug>:-Zi>" "$<$<CONFIG:Debug>:-O3>" "$<$<CONFIG:Debug>:-Qembed_debug>"
             "$<$<NOT:$<CONFIG:Debug>>:-O3>"
             -Fo "${_vertex_output}" "${shader_source}"
-        DEPENDS "${shader_source}"
-        COMMENT "Compiling diagnostic vertex shader with DXC"
+        DEPENDS "${shader_source}" ${ARGN}
+        COMMENT "Compiling vertex shader with DXC"
         COMMAND_EXPAND_LISTS
         VERBATIM)
 
@@ -68,11 +70,12 @@ function(daedalus_compile_shader_pair target_name shader_source output_directory
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_configuration_output_directory}"
         COMMAND "${_dxc}"
             -nologo -WX -HV 2021 -T ps_6_0 -E PSMain
+            -I "${_shader_include_directory}"
             "$<$<CONFIG:Debug>:-Zi>" "$<$<CONFIG:Debug>:-O3>" "$<$<CONFIG:Debug>:-Qembed_debug>"
             "$<$<NOT:$<CONFIG:Debug>>:-O3>"
             -Fo "${_pixel_output}" "${shader_source}"
-        DEPENDS "${shader_source}"
-        COMMENT "Compiling diagnostic pixel shader with DXC"
+        DEPENDS "${shader_source}" ${ARGN}
+        COMMENT "Compiling pixel shader with DXC"
         COMMAND_EXPAND_LISTS
         VERBATIM)
 

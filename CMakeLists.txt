@@ -51,11 +51,13 @@ target_compile_features(daedalus_scene PUBLIC cxx_std_20)
 daedalus_apply_project_warnings(daedalus_scene)
 
 add_library(daedalus_rendering STATIC
-    src/rendering/DiagnosticPreparation.cpp
-    src/rendering/DiagnosticPreparation.h
-    src/rendering/DiagnosticShaderContract.h
     src/rendering/OrbitCamera.cpp
-    src/rendering/OrbitCamera.h)
+    src/rendering/OrbitCamera.h
+    src/rendering/PbrMath.cpp
+    src/rendering/PbrMath.h
+    src/rendering/RasterPreparation.cpp
+    src/rendering/RasterPreparation.h
+    src/rendering/RasterShaderContract.h)
 target_link_libraries(daedalus_rendering PUBLIC daedalus_scene)
 target_include_directories(daedalus_rendering PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(daedalus_rendering PUBLIC cxx_std_20)
@@ -106,11 +108,19 @@ if(DAEDALUS_BUILD_APP)
     include(cmake/CompileShaders.cmake)
     set(DAEDALUS_SHADER_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders")
     daedalus_compile_shader_pair(
-        DaedalusDiagnosticShaders
-        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/Diagnostic.hlsl"
+        DaedalusRasterPbrShaders
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/RasterPbr.hlsl"
         "${DAEDALUS_SHADER_OUTPUT_DIRECTORY}"
-        "DiagnosticVS.dxil"
-        "DiagnosticPS.dxil")
+        "RasterPbrVS.dxil"
+        "RasterPbrPS.dxil"
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/common/PbrLighting.hlsli")
+    daedalus_compile_shader_pair(
+        DaedalusToneMapShaders
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/ToneMap.hlsl"
+        "${DAEDALUS_SHADER_OUTPUT_DIRECTORY}"
+        "ToneMapVS.dxil"
+        "ToneMapPS.dxil"
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/common/Color.hlsli")
 
     add_executable(Daedalus
         src/Application.cpp
@@ -120,8 +130,8 @@ if(DAEDALUS_BUILD_APP)
         src/core/Log.h
         src/graphics/D3D12Context.cpp
         src/graphics/D3D12Context.h
-        src/graphics/DiagnosticSceneRenderer.cpp
-        src/graphics/DiagnosticSceneRenderer.h
+        src/graphics/PbrSceneRenderer.cpp
+        src/graphics/PbrSceneRenderer.h
         src/platform/UniqueWin32Handle.h
         src/platform/Win32Window.cpp
         src/platform/Win32Window.h)
@@ -136,17 +146,23 @@ if(DAEDALUS_BUILD_APP)
         "DAEDALUS_BUILD_TYPE=\"$<CONFIG>\""
         "$<$<CONFIG:Debug>:DAEDALUS_DEBUG_BUILD>")
     daedalus_apply_project_warnings(Daedalus)
-    add_dependencies(Daedalus DaedalusDiagnosticShaders)
+    add_dependencies(Daedalus DaedalusRasterPbrShaders DaedalusToneMapShaders)
 
     add_custom_command(TARGET Daedalus POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:Daedalus>/shaders"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${DaedalusDiagnosticShaders_VERTEX_SHADER}"
-            "$<TARGET_FILE_DIR:Daedalus>/shaders/DiagnosticVS.dxil"
+            "${DaedalusRasterPbrShaders_VERTEX_SHADER}"
+            "$<TARGET_FILE_DIR:Daedalus>/shaders/RasterPbrVS.dxil"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${DaedalusDiagnosticShaders_PIXEL_SHADER}"
-            "$<TARGET_FILE_DIR:Daedalus>/shaders/DiagnosticPS.dxil"
-        COMMENT "Copying compiled diagnostic shaders beside Daedalus")
+            "${DaedalusRasterPbrShaders_PIXEL_SHADER}"
+            "$<TARGET_FILE_DIR:Daedalus>/shaders/RasterPbrPS.dxil"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${DaedalusToneMapShaders_VERTEX_SHADER}"
+            "$<TARGET_FILE_DIR:Daedalus>/shaders/ToneMapVS.dxil"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${DaedalusToneMapShaders_PIXEL_SHADER}"
+            "$<TARGET_FILE_DIR:Daedalus>/shaders/ToneMapPS.dxil"
+        COMMENT "Copying compiled Campaign C1 raster PBR and tone-map shaders beside Daedalus")
 endif()
 
 include(CTest)

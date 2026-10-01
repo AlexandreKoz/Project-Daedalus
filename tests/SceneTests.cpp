@@ -1,7 +1,6 @@
 #include "TestHarness.h"
 #include "scene/Math.h"
 #include "scene/Scene.h"
-#include "rendering/DiagnosticShaderContract.h"
 #include "rendering/OrbitCamera.h"
 
 #include <string>
@@ -85,16 +84,6 @@ void test_orbit_camera_finite_fallback_and_input()
 
 
 
-void test_diagnostic_shader_contract_layout()
-{
-    require(sizeof(DiagnosticDrawConstants) == 240, "diagnostic draw constants must remain 240 bytes");
-    require(alignof(DiagnosticDrawConstants) == 16, "diagnostic draw constants must remain 16-byte aligned");
-    require(offsetof(DiagnosticDrawConstants, diagnostic_mode) == 208, "diagnostic mode ABI offset changed");
-    require(offsetof(DiagnosticDrawConstants, texture_coord_set) == 220, "texture coordinate ABI offset changed");
-    require(offsetof(DiagnosticDrawConstants, world_handedness) == 224, "handedness ABI offset changed");
-    require(offsetof(DiagnosticDrawConstants, padding2) == 236, "explicit tail padding must remain part of the ABI");
-}
-
 void test_typed_identifiers()
 {
     NodeId node(3);
@@ -112,6 +101,5 @@ int main()
         {"cycle rejection", test_cycle_rejection},
         {"bounds transform", test_bounds_transform},
         {"orbit camera", test_orbit_camera_finite_fallback_and_input},
-        {"diagnostic shader contract layout", test_diagnostic_shader_contract_layout},
         {"typed identifiers", test_typed_identifiers}});
 }

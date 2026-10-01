@@ -21,6 +21,8 @@ FORBIDDEN_FILES = (
     "*.sln", "*.vcxproj", "*.vcxproj.filters", "*.vcxproj.user", "*.pdb", "*.ilk", "*.obj",
     "*.lib", "*.exp", "*.exe", "*.dll", "*.cso", "*.dxil", "*.cache", "*.log", "*.zip",
     "*.tar", "*.tar.gz", "*.7z", "*.pyc", "*.pyo",
+    ".env", ".env.*", "*.pem", "*.key", "*.pfx", "*.p12", "*.secret",
+    "id_rsa", "id_ed25519", "credentials.json", "secrets.json",
 )
 
 
@@ -111,7 +113,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
-    output = args.output or root.parent / "Project-Daedalus-Campaign-B-audit-closure-source.zip"
+    output = args.output or root.parent / "Project-Daedalus-Campaign-C1-PBR-source.zip"
     try:
         digest, count = write_archive(root, output.resolve())
     except (OSError, RuntimeError, zipfile.BadZipFile) as error:

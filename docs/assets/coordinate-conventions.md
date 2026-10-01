@@ -1,16 +1,40 @@
 # Coordinate, transform, winding, tangent, unit, and colour conventions
 
 - Canonical space preserves glTF's right-handed Cartesian convention, metres as the declared unit, and counter-clockwise triangle front faces.
-- Matrices are stored column-major and multiply column vectors. Hierarchy composition is `world = parent_world * local`.
-- glTF node matrices are copied in source order. TRS is composed as translation × rotation × scale.
-- No handedness conversion occurs in the importer. The D3D12 diagnostic boundary uses right-handed view/projection math with a Direct3D zero-to-one depth range and configures front faces as counter-clockwise.
-- Negative scale is not baked into vertices. Each node records a negative determinant. The Campaign B diagnostic PSO disables culling to prevent mirrored instances from disappearing; Campaign C must define material-aware culling.
-- Tangent XYZ and W handedness are preserved. Missing tangents default to `(1,0,0,+1)` with a warning; Campaign B does not reconstruct tangent space.
-- Bounds are recomputed in canonical local space and transformed using all eight corners for world bounds.
-- Base-colour and emissive textures are classified sRGB; normal, metallic-roughness, and occlusion data are linear. A texture referenced in conflicting roles is conservatively retained with deterministic metadata and should be split or diagnosed in future schema revisions.
+- Matrix/TRS world propagation is deterministic and remains renderer/API independent.
+- No handedness conversion occurs in the importer. The D3D12 boundary uses right-handed view/projection math with Direct3D zero-to-one depth.
+- Negative scale is not baked into vertices. Each node records negative determinant.
+- Tangent XYZ and source W handedness are preserved. Missing source tangents remain explicitly represented by `Primitive::has_tangents == false`; storage defaults do not make the basis semantically present.
+- Decoded canonical images have top-left origin and tightly packed RGBA8 rows.
+- Colour-space intent is material-slot driven rather than inferred from filenames.
 
-## Tangent and UV diagnostics
+## Campaign C1 raster winding and culling
 
-`--diagnostic tangents` transforms tangent XYZ into world orientation and encodes direction in red/green while blue distinguishes positive versus negative handedness. Negative world determinant multiplies tangent sign at the renderer boundary. This diagnostic proves transport only; it is not normal mapping.
+Campaign C1 replaces the Campaign B cull-disabled diagnostic policy with material-aware raster state:
 
-HLSL chooses `uv0` or `uv1` using the per-draw `texture_coord_set` constant. No UV0 fallback occurs when a material requests UV1; the importer rejects that mismatch before runtime preparation.
+- single-sided positive-determinant instances use counter-clockwise front faces and back-face culling;
+- single-sided negative-determinant instances flip the D3D12 front-face convention so mirrored canonical geometry remains visible without rewriting indices;
+- `doubleSided` disables culling;
+- double-sided back-facing fragments reverse the shading normal and tangent handedness using `SV_IsFrontFace` while preserving authored UV tangent directions, so disabling culling does not leave backside normal-map lighting mathematically wrong.
+
+## Normal/tangent transform
+
+For PBR shading, normals use the inverse-transpose world matrix and are normalized. Tangent XYZ uses the world matrix and is Gram-Schmidt orthogonalized against the shading-side normal. Tangent-space handedness is:
+
+```text
+source tangent w * sign(world determinant) * face sign
+```
+
+The bitangent is `cross(N,T) * handedness`. `normalTexture.scale` modifies tangent-space X/Y before final normalization/TBN transformation.
+
+A normal texture is not evaluated if the source primitive lacks tangents. C1 intentionally has no derivative fallback and never invents an arbitrary tangent basis.
+
+## UV and material-slot convention
+
+Each canonical material texture reference retains its own `texcoord_set` (supported values 0/1). No runtime UV0 fallback occurs when a material requests UV1; the importer rejects the mismatch.
+
+Base-colour and emissive RGB use sRGB SRVs. Metallic-roughness, normal, and occlusion use linear SRVs. sRGB decode does not alter base-colour alpha semantics.
+
+## Diagnostics
+
+`--diagnostic normals` displays the actual shading normal after double-sided and normal-map handling. `uv`, `tangents`, `base-color`, `metallic`, `roughness`, `emissive`, and `material-id` expose production-path intermediates rather than a separate fake material path.

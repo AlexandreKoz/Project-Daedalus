@@ -30,7 +30,7 @@ void test_command_line_values()
         std::wstring_view(L"--warp"), std::wstring_view(L"--frames"), std::wstring_view(L"120"),
         std::wstring_view(L"--asset"), std::wstring_view(L"scene.glb"), std::wstring_view(L"--scene"),
         std::wstring_view(L"Main"), std::wstring_view(L"--dump-scene"), std::wstring_view(L"--diagnostic"),
-        std::wstring_view(L"normals"), std::wstring_view(L"--import-report"), std::wstring_view(L"report.json")};
+        std::wstring_view(L"normals"), std::wstring_view(L"--exposure"), std::wstring_view(L"1.5"), std::wstring_view(L"--import-report"), std::wstring_view(L"report.json")};
     const daedalus::CommandLineOptions options = daedalus::parse_command_line(arguments);
     require(options.use_warp, "--warp must be recognized");
     require(options.frame_limit == 120, "--frames value must be parsed");
@@ -38,6 +38,7 @@ void test_command_line_values()
     require(options.scene_selector == "Main", "--scene must be parsed");
     require(options.dump_scene, "--dump-scene must be parsed");
     require(options.diagnostic_mode == daedalus::DiagnosticMode::normals, "--diagnostic must be parsed");
+    require_near(options.exposure_ev, 1.5F, 1.0e-6F, "--exposure must be parsed");
     require(options.import_report_path == std::filesystem::path(L"report.json"), "--import-report must be parsed");
 }
 
@@ -59,6 +60,23 @@ void test_tangent_diagnostic_mode()
     require(options.diagnostic_mode == daedalus::DiagnosticMode::tangents, "tangent diagnostic mode must parse");
     require(daedalus::to_string(options.diagnostic_mode) == "tangents", "tangent diagnostic mode must format deterministically");
     require(daedalus::usage_text().find("tangents") != std::string::npos, "help must document tangent diagnostics");
+}
+
+void test_campaign_c1_diagnostic_modes()
+{
+    constexpr std::array modes{
+        std::wstring_view(L"base-color"), std::wstring_view(L"metallic"), std::wstring_view(L"roughness"),
+        std::wstring_view(L"emissive"), std::wstring_view(L"material-id")};
+    constexpr std::array expected{
+        daedalus::DiagnosticMode::base_color, daedalus::DiagnosticMode::metallic, daedalus::DiagnosticMode::roughness,
+        daedalus::DiagnosticMode::emissive, daedalus::DiagnosticMode::material_id};
+    for (std::size_t index = 0; index < modes.size(); ++index)
+    {
+        const std::array arguments{std::wstring_view(L"--diagnostic"), modes[index]};
+        require(daedalus::parse_command_line(arguments).diagnostic_mode == expected[index], "Campaign C1 diagnostic mode must parse");
+    }
+    constexpr std::array high_exposure{std::wstring_view(L"--exposure"), std::wstring_view(L"25")};
+    require_throws<daedalus::CommandLineError>([&] { static_cast<void>(daedalus::parse_command_line(high_exposure)); }, "exposure outside documented range must reject");
 }
 
 void test_stress_command_line()
@@ -134,6 +152,7 @@ int main()
         {"command line values", test_command_line_values},
         {"command line rejections", test_command_line_rejections},
         {"tangent diagnostic mode", test_tangent_diagnostic_mode},
+        {"Campaign C1 diagnostics", test_campaign_c1_diagnostic_modes},
         {"stress command line", test_stress_command_line},
         {"result formatting", test_result_formatting},
         {"adapter policy", test_adapter_policy},

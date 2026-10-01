@@ -380,6 +380,144 @@ repair_doc = {
 }
 (VALID / "repaired_vectors.gltf").write_text(json.dumps(repair_doc, indent=2), encoding="utf-8")
 
+
+# Campaign C1 controlled PBR fixtures. These deliberately keep geometry tiny and
+# vary one material/light contract at a time so CPU metadata tests and GPU diagnostic
+# captures can isolate channel, colour-space, tangent, alpha, and punctual-light errors.
+def c1_base_document(*, materials: list[dict], images: list[bytes] | None = None,
+                     mesh_materials: list[int | None] | None = None,
+                     node_transforms: list[dict] | None = None,
+                     lights: list[dict] | None = None,
+                     node_lights: list[int] | None = None,
+                     tangents: tuple[float, ...] | None = None) -> dict:
+    positions = struct.pack("<9f", -0.45, -0.45, 0.0, 0.45, -0.45, 0.0, 0.0, 0.45, 0.0)
+    normals = struct.pack("<9f", *([0.0, 0.0, 1.0] * 3))
+    tangent_values = tangents or (1.0,0.0,0.0,1.0, 1.0,0.0,0.0,1.0, 1.0,0.0,0.0,1.0)
+    tangent_bytes = struct.pack("<12f", *tangent_values)
+    uvs = struct.pack("<6f", 0.0,1.0, 1.0,1.0, 0.5,0.0)
+    colours = struct.pack("<12f", 1.0,0.5,0.25,0.8, 0.5,1.0,0.25,0.8, 0.5,0.5,1.0,0.8)
+    indices = struct.pack("<3H", 0,1,2)
+    blob = align4(positions) + align4(normals) + align4(tangent_bytes) + align4(uvs) + align4(colours) + indices
+    offsets = (0, 36, 72, 120, 144, 192)
+    document = {
+        "asset": {"version": "2.0", "generator": "Daedalus Campaign C1 fixture generator", "copyright": "CC0 self-authored fixture"},
+        "buffers": [{"uri": data_uri(blob), "byteLength": len(blob)}],
+        "bufferViews": [
+            {"buffer":0,"byteOffset":offsets[0],"byteLength":36},
+            {"buffer":0,"byteOffset":offsets[1],"byteLength":36},
+            {"buffer":0,"byteOffset":offsets[2],"byteLength":48},
+            {"buffer":0,"byteOffset":offsets[3],"byteLength":24},
+            {"buffer":0,"byteOffset":offsets[4],"byteLength":48},
+            {"buffer":0,"byteOffset":offsets[5],"byteLength":6},
+        ],
+        "accessors": [
+            {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"},
+            {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
+            {"bufferView":2,"componentType":5126,"count":3,"type":"VEC4"},
+            {"bufferView":3,"componentType":5126,"count":3,"type":"VEC2"},
+            {"bufferView":4,"componentType":5126,"count":3,"type":"VEC4"},
+            {"bufferView":5,"componentType":5123,"count":3,"type":"SCALAR"},
+        ],
+        "materials": materials,
+    }
+    if images:
+        document["images"] = [{"name":f"C1Image{index}", "uri":data_uri(image, "image/png")} for index, image in enumerate(images)]
+        document["samplers"] = [{"name":f"C1Sampler{index}", "magFilter":9729, "minFilter":9729, "wrapS":10497, "wrapT":10497} for index in range(len(images))]
+        document["textures"] = [{"name":f"C1Texture{index}", "source":index, "sampler":index} for index in range(len(images))]
+    material_indices = mesh_materials if mesh_materials is not None else list(range(len(materials)))
+    document["meshes"] = []
+    document["nodes"] = []
+    transforms = node_transforms or [{} for _ in material_indices]
+    for index, material_index in enumerate(material_indices):
+        primitive = {"attributes":{"POSITION":0,"NORMAL":1,"TANGENT":2,"TEXCOORD_0":3,"COLOR_0":4}, "indices":5}
+        if material_index is not None:
+            primitive["material"] = material_index
+        document["meshes"].append({"name":f"C1Mesh{index}", "primitives":[primitive]})
+        node = {"name":f"C1Node{index}", "mesh":index}
+        node.update(transforms[index] if index < len(transforms) else {})
+        document["nodes"].append(node)
+    if lights:
+        document["extensionsUsed"] = ["KHR_lights_punctual"]
+        document["extensions"] = {"KHR_lights_punctual":{"lights":lights}}
+        for light_index in (node_lights or list(range(len(lights)))):
+            node = {"name":f"C1LightNode{light_index}", "extensions":{"KHR_lights_punctual":{"light":light_index}}}
+            document["nodes"].append(node)
+    document["scenes"] = [{"name":"CampaignC1", "nodes":list(range(len(document["nodes"])))}]
+    document["scene"] = 0
+    return document
+
+
+def write_c1(name: str, document: dict) -> None:
+    (VALID / name).write_text(json.dumps(document, indent=2), encoding="utf-8")
+
+
+write_c1("c1_base_color_factor.gltf", c1_base_document(materials=[{
+    "name":"BaseColorFactorAndVertexColor",
+    "pbrMetallicRoughness":{"baseColorFactor":[0.25,0.5,0.75,0.8],"metallicFactor":0.0,"roughnessFactor":1.0}
+}]))
+
+write_c1("c1_srgb_base_color.gltf", c1_base_document(
+    materials=[{"name":"SrgbBaseColor","pbrMetallicRoughness":{"baseColorTexture":{"index":0},"metallicFactor":0.0,"roughnessFactor":1.0}}],
+    images=[png_rgba(1,1,bytes([128,64,32,192]))]))
+
+write_c1("c1_metallic_roughness.gltf", c1_base_document(
+    materials=[{"name":"GBChannelProof","pbrMetallicRoughness":{
+        "baseColorFactor":[0.8,0.8,0.8,1.0],"metallicFactor":0.8,"roughnessFactor":0.4,
+        "metallicRoughnessTexture":{"index":0}}}],
+    images=[png_rgba(1,1,bytes([17,64,192,255]))]))
+
+write_c1("c1_normal_map.gltf", c1_base_document(
+    materials=[{"name":"NormalScaleProof","pbrMetallicRoughness":{"metallicFactor":0.0,"roughnessFactor":0.7},
+                "normalTexture":{"index":0,"scale":0.5}}],
+    images=[png_rgba(1,1,bytes([128,255,128,255]))]))
+
+write_c1("c1_tangent_negative_scale.gltf", c1_base_document(
+    materials=[{"name":"TangentHandedness","pbrMetallicRoughness":{"metallicFactor":0.0,"roughnessFactor":0.7},
+                "normalTexture":{"index":0,"scale":1.0}}],
+    images=[png_rgba(1,1,bytes([255,128,128,255]))],
+    mesh_materials=[0,0],
+    node_transforms=[{"translation":[-0.7,0,0]}, {"translation":[0.7,0,0],"scale":[-1,1,1]}],
+    tangents=(1.0,0.0,0.0,1.0, 1.0,0.0,0.0,-1.0, 1.0,0.0,0.0,1.0)))
+
+write_c1("c1_emissive.gltf", c1_base_document(
+    materials=[{"name":"EmissiveFactorTexture","pbrMetallicRoughness":{"baseColorFactor":[0.05,0.05,0.05,1],"metallicFactor":0.0},
+                "emissiveFactor":[0.5,1.0,0.25],"emissiveTexture":{"index":0}}],
+    images=[png_rgba(1,1,bytes([128,64,32,255]))]))
+
+write_c1("c1_occlusion.gltf", c1_base_document(
+    materials=[{"name":"OcclusionRStrength","pbrMetallicRoughness":{"metallicFactor":0.0,"roughnessFactor":1.0},
+                "occlusionTexture":{"index":0,"strength":0.6}}],
+    images=[png_rgba(1,1,bytes([64,200,240,255]))]))
+
+alpha_images = [png_rgba(1,1,bytes([255,255,255,64])), png_rgba(1,1,bytes([255,255,255,192]))]
+alpha_materials = [
+    {"name":"Opaque","pbrMetallicRoughness":{"baseColorFactor":[1,0.2,0.2,1]},"alphaMode":"OPAQUE"},
+    {"name":"MaskBelow","pbrMetallicRoughness":{"baseColorTexture":{"index":0}},"alphaMode":"MASK","alphaCutoff":0.5},
+    {"name":"MaskAbove","pbrMetallicRoughness":{"baseColorTexture":{"index":1}},"alphaMode":"MASK","alphaCutoff":0.5},
+    {"name":"Blend","pbrMetallicRoughness":{"baseColorFactor":[0.2,0.4,1.0,0.4]},"alphaMode":"BLEND"},
+]
+write_c1("c1_alpha_modes.gltf", c1_base_document(
+    materials=alpha_materials, images=alpha_images, mesh_materials=[0,1,2,3],
+    node_transforms=[{"translation":[-1.5,0,0]}, {"translation":[-0.5,0,0]}, {"translation":[0.5,0,0]}, {"translation":[1.5,0,0]}]))
+
+write_c1("c1_double_sided.gltf", c1_base_document(materials=[{
+    "name":"DoubleSided","pbrMetallicRoughness":{"baseColorFactor":[0.8,0.8,0.2,1],"metallicFactor":0.0,"roughnessFactor":0.6},
+    "doubleSided":True
+}]))
+
+write_c1("c1_directional_light.gltf", c1_base_document(
+    materials=[{"name":"WhiteDiffuse","pbrMetallicRoughness":{"baseColorFactor":[0.8,0.8,0.8,1],"metallicFactor":0.0,"roughnessFactor":0.8}}],
+    lights=[{"name":"Directional","type":"directional","color":[1.0,0.8,0.6],"intensity":3.0}]))
+
+write_c1("c1_point_light.gltf", c1_base_document(
+    materials=[{"name":"WhiteDiffuse","pbrMetallicRoughness":{"baseColorFactor":[0.8,0.8,0.8,1],"metallicFactor":0.0,"roughnessFactor":0.8}}],
+    lights=[{"name":"PointRange","type":"point","color":[0.6,0.8,1.0],"intensity":40.0,"range":4.0}]))
+
+write_c1("c1_spot_light.gltf", c1_base_document(
+    materials=[{"name":"WhiteDiffuse","pbrMetallicRoughness":{"baseColorFactor":[0.8,0.8,0.8,1],"metallicFactor":0.0,"roughnessFactor":0.8}}],
+    lights=[{"name":"SpotCone","type":"spot","color":[1.0,1.0,1.0],"intensity":60.0,"range":5.0,
+             "spot":{"innerConeAngle":0.2,"outerConeAngle":0.5}}]))
+
 # Structurally valid PNG chunks whose IDAT payload does not begin with a legal
 # PNG zlib/DEFLATE stream. Some Windows WIC versions are permissive here, so the
 # importer validates the zlib envelope before backend-specific pixel decode.
@@ -505,7 +643,11 @@ manifest = {
     "valid": [
         "minimal.glb", "external_scene.gltf", "embedded_image.glb", "data_uri_scene.gltf",
         "jpeg_image.gltf", "stale_bounds.gltf", "material_default.gltf", "uv1_scene.gltf",
-        "instanced_tangents.gltf", "repaired_vectors.gltf"
+        "instanced_tangents.gltf", "repaired_vectors.gltf",
+        "c1_base_color_factor.gltf", "c1_srgb_base_color.gltf", "c1_metallic_roughness.gltf",
+        "c1_normal_map.gltf", "c1_tangent_negative_scale.gltf", "c1_emissive.gltf", "c1_occlusion.gltf",
+        "c1_alpha_modes.gltf", "c1_double_sided.gltf", "c1_directional_light.gltf",
+        "c1_point_light.gltf", "c1_spot_light.gltf"
     ],
     "invalid": [
         "malformed_json.gltf", "corrupted_header.glb", "missing_buffer.gltf", "missing_image.gltf",
@@ -518,4 +660,4 @@ manifest = {
     ],
 }
 (ROOT / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-print("Generated Campaign B fixtures")
+print("Generated Campaign B + Campaign C1 fixtures")

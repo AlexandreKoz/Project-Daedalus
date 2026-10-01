@@ -1,6 +1,7 @@
 #include "core/CommandLine.h"
 
 #include <charconv>
+#include <cmath>
 #include <limits>
 
 namespace daedalus
@@ -35,6 +36,16 @@ namespace
         result.push_back(static_cast<char>(character));
     }
     return result;
+}
+
+[[nodiscard]] float parse_exposure(std::wstring_view value)
+{
+    const std::string narrow = narrow_ascii(value, "--exposure");
+    float parsed = 0.0F;
+    const auto [end, error] = std::from_chars(narrow.data(), narrow.data() + narrow.size(), parsed);
+    if (error != std::errc{} || end != narrow.data() + narrow.size() || !std::isfinite(parsed) || parsed < -24.0F || parsed > 24.0F)
+        throw CommandLineError("--exposure requires a finite EV value in [-24, +24]");
+    return parsed;
 }
 
 [[nodiscard]] std::wstring_view require_value(std::span<const std::wstring_view> arguments,
@@ -88,6 +99,10 @@ CommandLineOptions parse_command_line(std::span<const std::wstring_view> argumen
             if (options.stress_alternate_asset_path.has_value()) throw CommandLineError("--stress-alternate-asset may be specified only once");
             options.stress_alternate_asset_path = std::filesystem::path(require_value(arguments, index, "--stress-alternate-asset"));
         }
+        else if (argument == L"--exposure")
+        {
+            options.exposure_ev = parse_exposure(require_value(arguments, index, "--exposure"));
+        }
         else if (argument == L"--diagnostic")
         {
             const std::string value = narrow_ascii(require_value(arguments, index, "--diagnostic"), "--diagnostic");
@@ -96,7 +111,12 @@ CommandLineOptions parse_command_line(std::span<const std::wstring_view> argumen
             else if (value == "uv") options.diagnostic_mode = DiagnosticMode::uv;
             else if (value == "tangents") options.diagnostic_mode = DiagnosticMode::tangents;
             else if (value == "bounds") options.diagnostic_mode = DiagnosticMode::bounds;
-            else throw CommandLineError("--diagnostic must be shaded, normals, uv, tangents, or bounds");
+            else if (value == "base-color") options.diagnostic_mode = DiagnosticMode::base_color;
+            else if (value == "metallic") options.diagnostic_mode = DiagnosticMode::metallic;
+            else if (value == "roughness") options.diagnostic_mode = DiagnosticMode::roughness;
+            else if (value == "emissive") options.diagnostic_mode = DiagnosticMode::emissive;
+            else if (value == "material-id") options.diagnostic_mode = DiagnosticMode::material_id;
+            else throw CommandLineError("--diagnostic must be shaded, normals, uv, tangents, bounds, base-color, metallic, roughness, emissive, or material-id");
         }
         else
         {
@@ -124,7 +144,9 @@ std::string usage_text()
         "  --scene <index-or-name>        Select a source scene.\n"
         "  --dump-scene                   Print the canonical scene hierarchy.\n"
         "  --import-report <path>         Write the deterministic JSON import report.\n"
-        "  --diagnostic <mode>            shaded, normals, uv, tangents, or bounds.\n"
+        "  --diagnostic <mode>            shaded, normals, uv, tangents, bounds, base-color, metallic,\n"
+        "                                 roughness, emissive, or material-id.\n"
+        "  --exposure <ev>                Tone-map exposure in EV, range [-24, +24], default 0.\n"
         "  --warp                         Select the Microsoft WARP software adapter.\n"
         "  --frames <count>               Exit cleanly after presenting count frames.\n"
         "  --stress-reloads <count>       Recreate scene resources count times.\n"
@@ -144,6 +166,11 @@ std::string_view to_string(DiagnosticMode mode) noexcept
     case DiagnosticMode::uv: return "uv";
     case DiagnosticMode::tangents: return "tangents";
     case DiagnosticMode::bounds: return "bounds";
+    case DiagnosticMode::base_color: return "base-color";
+    case DiagnosticMode::metallic: return "metallic";
+    case DiagnosticMode::roughness: return "roughness";
+    case DiagnosticMode::emissive: return "emissive";
+    case DiagnosticMode::material_id: return "material-id";
     }
     return "shaded";
 }

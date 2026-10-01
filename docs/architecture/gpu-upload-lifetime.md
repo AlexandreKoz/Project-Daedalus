@@ -27,3 +27,21 @@ These source-level contracts still require Windows compilation, DirectX debug-la
 ## Windows live-object acquisition follow-up
 
 `DXGIGetDebugInterface1` is obtained through the linked DXGI 1.3 API, not by searching `dxgidebug.dll` for that symbol. The application releases renderer/context/window resources first, requests the DXGI report once, and uses an idempotent shutdown guard so destructor entry cannot duplicate the report. The detailed D3D12/DXGI object listing is still debugger output and must be inspected during acceptance; a successful API return alone is not treated as proof of zero unexpected live objects.
+
+## Campaign C1 HDR/raster resource additions
+
+Campaign C1 preserves the Campaign B staging model and adds renderer-owned PBR resources without moving GPU ownership into the canonical scene:
+
+- resolution-dependent `R16G16B16A16_FLOAT` HDR scene colour and `D32_FLOAT` depth resources;
+- renderer-owned RTV/DSV/SRV/sampler heaps;
+- one linear and one sRGB SRV for each canonical RGBA8 texture over the same typeless GPU resource;
+- forward/tone root signatures and PSOs;
+- persistently mapped upload-heap frame, light, and draw constant storage partitioned by swap-chain frame index.
+
+`D3D12Context::begin_frame` waits the fence associated with a frame partition before the CPU rewrites that partition. Draw constants allocate a deterministic per-frame slot range, so queued work cannot observe later-frame CPU writes. The light buffer is similarly frame-partitioned.
+
+HDR state is explicit each frame: the target starts/ends in `PIXEL_SHADER_RESOURCE`, transitions to `RENDER_TARGET` for forward shading, then returns to `PIXEL_SHADER_RESOURCE` before the tone pass. Swap-chain PRESENT/RENDER_TARGET transitions remain owned by the context/application recording path. Depth remains in `DEPTH_WRITE` for the forward pass.
+
+Resize first goes through the context's GPU-idle/swap-chain recreation discipline and only then recreates the renderer's resolution-dependent HDR/depth resources. Scene reload waits for GPU idle before destroying the old renderer, then rebuilds geometry, textures, descriptors, preparation data, and constant storage against the new canonical scene.
+
+These are source-level invariants. Campaign C1's exact D3D12 resource-state, resize/reload, and post-teardown live-object behavior remains `NOT RUN`/`BLOCKED` in the delivery environment until the documented Windows validation is executed.

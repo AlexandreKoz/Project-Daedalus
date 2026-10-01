@@ -10,7 +10,7 @@ $InvocationDirectory = (Get-Location).Path
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $RepositoryParent = Split-Path -Parent $RepositoryRoot
 if (-not $OutputPath) {
-    $OutputPath = Join-Path $RepositoryParent "Project-Daedalus-Campaign-B-audit-closure-source.zip"
+    $OutputPath = Join-Path $RepositoryParent "Project-Daedalus-Campaign-C1-PBR-source.zip"
 }
 elseif (-not [System.IO.Path]::IsPathFullyQualified($OutputPath)) {
     $OutputPath = Join-Path $InvocationDirectory $OutputPath
@@ -32,7 +32,8 @@ $ForbiddenFilePatterns = @(
     "CMakeCache.txt", "cmake_install.cmake", "CTestTestfile.cmake", "compile_commands.json",
     "*.sln", "*.vcxproj", "*.vcxproj.filters", "*.vcxproj.user", "*.pdb", "*.ilk", "*.obj",
     "*.lib", "*.exp", "*.exe", "*.dll", "*.cso", "*.dxil", "*.cache", "*.log", "*.zip",
-    "*.tar", "*.tar.gz", "*.7z", "*.pyc", "*.pyo"
+    "*.tar", "*.tar.gz", "*.7z", "*.pyc", "*.pyo", ".env", ".env.*", "*.pem", "*.key",
+    "*.pfx", "*.p12", "*.secret", "id_rsa", "id_ed25519", "credentials.json", "secrets.json"
 )
 
 function Test-ForbiddenRelativePath([string]$RelativePath, [bool]$IsDirectory) {

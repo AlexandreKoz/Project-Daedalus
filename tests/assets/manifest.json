@@ -10,7 +10,19 @@
     "material_default.gltf",
     "uv1_scene.gltf",
     "instanced_tangents.gltf",
-    "repaired_vectors.gltf"
+    "repaired_vectors.gltf",
+    "c1_base_color_factor.gltf",
+    "c1_srgb_base_color.gltf",
+    "c1_metallic_roughness.gltf",
+    "c1_normal_map.gltf",
+    "c1_tangent_negative_scale.gltf",
+    "c1_emissive.gltf",
+    "c1_occlusion.gltf",
+    "c1_alpha_modes.gltf",
+    "c1_double_sided.gltf",
+    "c1_directional_light.gltf",
+    "c1_point_light.gltf",
+    "c1_spot_light.gltf"
   ],
   "invalid": [
     "malformed_json.gltf",

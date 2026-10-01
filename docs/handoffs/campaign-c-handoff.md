@@ -1,5 +1,7 @@
 # Campaign C handoff after Campaign B audit closure
 
+> Historical B -> C entry document. Campaign C1 has now consumed these contracts. The current forward handoff is `docs/handoffs/campaign-c2-handoff.md`. This file intentionally preserves Campaign B's historical acceptance caveats rather than rewriting them as C1 success.
+
 Campaign C may design production shading against the following **canonical CPU contracts**, which are now covered by portable regression tests:
 
 - source material indices are stable;

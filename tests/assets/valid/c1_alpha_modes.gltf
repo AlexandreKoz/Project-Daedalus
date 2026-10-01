@@ -1,0 +1,283 @@
+{
+  "asset": {
+    "version": "2.0",
+    "generator": "Daedalus Campaign C1 fixture generator",
+    "copyright": "CC0 self-authored fixture"
+  },
+  "buffers": [
+    {
+      "uri": "data:application/octet-stream;base64,ZmbmvmZm5r4AAAAAZmbmPmZm5r4AAAAAAAAAAGZm5j4AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAIA/AAAAAAAAAAAAAIA/AAAAAAAAgD8AAIA/AACAPwAAAD8AAAAAAACAPwAAAD8AAIA+zcxMPwAAAD8AAIA/AACAPs3MTD8AAAA/AAAAPwAAgD/NzEw/AAABAAIA",
+      "byteLength": 198
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 36
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 36,
+      "byteLength": 36
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 72,
+      "byteLength": 48
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 120,
+      "byteLength": 24
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 144,
+      "byteLength": 48
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 192,
+      "byteLength": 6
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC4"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 4,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC4"
+    },
+    {
+      "bufferView": 5,
+      "componentType": 5123,
+      "count": 3,
+      "type": "SCALAR"
+    }
+  ],
+  "materials": [
+    {
+      "name": "Opaque",
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          1,
+          0.2,
+          0.2,
+          1
+        ]
+      },
+      "alphaMode": "OPAQUE"
+    },
+    {
+      "name": "MaskBelow",
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 0
+        }
+      },
+      "alphaMode": "MASK",
+      "alphaCutoff": 0.5
+    },
+    {
+      "name": "MaskAbove",
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 1
+        }
+      },
+      "alphaMode": "MASK",
+      "alphaCutoff": 0.5
+    },
+    {
+      "name": "Blend",
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          0.2,
+          0.4,
+          1.0,
+          0.4
+        ]
+      },
+      "alphaMode": "BLEND"
+    }
+  ],
+  "images": [
+    {
+      "name": "C1Image0",
+      "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4//+/AwAJPAM+hOBIhgAAAABJRU5ErkJggg=="
+    },
+    {
+      "name": "C1Image1",
+      "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4////AQAJvAO+ga4EVAAAAABJRU5ErkJggg=="
+    }
+  ],
+  "samplers": [
+    {
+      "name": "C1Sampler0",
+      "magFilter": 9729,
+      "minFilter": 9729,
+      "wrapS": 10497,
+      "wrapT": 10497
+    },
+    {
+      "name": "C1Sampler1",
+      "magFilter": 9729,
+      "minFilter": 9729,
+      "wrapS": 10497,
+      "wrapT": 10497
+    }
+  ],
+  "textures": [
+    {
+      "name": "C1Texture0",
+      "source": 0,
+      "sampler": 0
+    },
+    {
+      "name": "C1Texture1",
+      "source": 1,
+      "sampler": 1
+    }
+  ],
+  "meshes": [
+    {
+      "name": "C1Mesh0",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "TANGENT": 2,
+            "TEXCOORD_0": 3,
+            "COLOR_0": 4
+          },
+          "indices": 5,
+          "material": 0
+        }
+      ]
+    },
+    {
+      "name": "C1Mesh1",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "TANGENT": 2,
+            "TEXCOORD_0": 3,
+            "COLOR_0": 4
+          },
+          "indices": 5,
+          "material": 1
+        }
+      ]
+    },
+    {
+      "name": "C1Mesh2",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "TANGENT": 2,
+            "TEXCOORD_0": 3,
+            "COLOR_0": 4
+          },
+          "indices": 5,
+          "material": 2
+        }
+      ]
+    },
+    {
+      "name": "C1Mesh3",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "TANGENT": 2,
+            "TEXCOORD_0": 3,
+            "COLOR_0": 4
+          },
+          "indices": 5,
+          "material": 3
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "C1Node0",
+      "mesh": 0,
+      "translation": [
+        -1.5,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "C1Node1",
+      "mesh": 1,
+      "translation": [
+        -0.5,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "C1Node2",
+      "mesh": 2,
+      "translation": [
+        0.5,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "C1Node3",
+      "mesh": 3,
+      "translation": [
+        1.5,
+        0,
+        0
+      ]
+    }
+  ],
+  "scenes": [
+    {
+      "name": "CampaignC1",
+      "nodes": [
+        0,
+        1,
+        2,
+        3
+      ]
+    }
+  ],
+  "scene": 0
+}

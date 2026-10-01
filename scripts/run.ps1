@@ -10,8 +10,10 @@ param(
     [string]$Scene = "",
     [string]$ImportReport = "",
     [switch]$DumpScene,
-    [ValidateSet("shaded", "normals", "uv", "tangents", "bounds")]
+    [ValidateSet("shaded", "normals", "uv", "tangents", "bounds", "base-color", "metallic", "roughness", "emissive", "material-id")]
     [string]$Diagnostic = "shaded",
+    [ValidateRange(-24.0, 24.0)]
+    [double]$Exposure = 0.0,
     [UInt64]$StressReloads = 0,
     [string]$StressAlternateAsset = "",
     [switch]$StressResize,
@@ -49,7 +51,7 @@ function Resolve-OutputPath([string]$Path, [string]$BaseDirectory) {
     return [System.IO.Path]::GetFullPath((Join-Path $BaseDirectory $Path))
 }
 
-$Arguments = @("--diagnostic", $Diagnostic)
+$Arguments = @("--diagnostic", $Diagnostic, "--exposure", $Exposure.ToString([System.Globalization.CultureInfo]::InvariantCulture))
 if ($Warp) { $Arguments += "--warp" }
 if ($Frames -gt 0) { $Arguments += @("--frames", $Frames.ToString()) }
 if ($Asset) { $Arguments += @("--asset", (Resolve-Path $Asset).Path) }

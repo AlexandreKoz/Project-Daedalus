@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hlsl"}
+SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hlsl", ".hlsli"}
 
 
 def fail(message: str, failures: list[str]) -> None:
@@ -38,26 +38,40 @@ def main() -> int:
                 if "#define WIN32_LEAN_AND_MEAN" not in prefix:
                     fail(f"{path.relative_to(ROOT)} includes Windows.h without defining WIN32_LEAN_AND_MEAN first", failures)
 
-    # Guard the CPU/HLSL constant-buffer ABI that previously relied on implicit MSVC tail padding.
-    contract = (ROOT / "src/rendering/DiagnosticShaderContract.h").read_text(encoding="utf-8")
-    shader = (ROOT / "shaders/Diagnostic.hlsl").read_text(encoding="utf-8")
+    # Guard the Campaign C1 CPU/HLSL constant-buffer ABI and stable material-ID contract.
+    contract = (ROOT / "src/rendering/RasterShaderContract.h").read_text(encoding="utf-8")
+    shader = (ROOT / "shaders/RasterPbr.hlsl").read_text(encoding="utf-8")
     required_cpu = [
-        "struct alignas(16) DiagnosticDrawConstants",
-        "std::uint32_t padding2 = 0;",
-        "sizeof(DiagnosticDrawConstants) == 240",
-        "offsetof(DiagnosticDrawConstants, padding2) == 236",
+        "struct alignas(16) RasterFrameConstants",
+        "struct alignas(16) RasterDrawConstants",
+        "struct alignas(16) RasterLightGpu",
+        "sizeof(RasterFrameConstants) == 112",
+        "sizeof(RasterDrawConstants) == 224",
+        "offsetof(RasterDrawConstants, world_handedness) == 208",
+        "sizeof(RasterLightGpu) == 64",
     ]
-    required_hlsl = ["uint padding2;"]
+    required_hlsl = [
+        "cbuffer FrameConstants : register(b0)",
+        "cbuffer DrawConstants : register(b1)",
+        "cbuffer LightConstants : register(b2)",
+        "float world_handedness;",
+        "uint material_diagnostic_id;",
+    ]
     for token in required_cpu:
         if token not in contract:
-            fail(f"DiagnosticShaderContract.h missing ABI guard: {token}", failures)
+            fail(f"RasterShaderContract.h missing ABI guard: {token}", failures)
     for token in required_hlsl:
         if token not in shader:
-            fail(f"Diagnostic.hlsl missing ABI field: {token}", failures)
+            fail(f"RasterPbr.hlsl missing ABI field/contract: {token}", failures)
+
+    preparation = (ROOT / "src/rendering/RasterPreparation.cpp").read_text(encoding="utf-8")
+    for token in ["return kDefaultMaterialDiagnosticId;", "return material.value() + 1U;"]:
+        if token not in preparation:
+            fail(f"RasterPreparation.cpp missing stable material-ID sentinel rule: {token}", failures)
 
     # The PowerShell wrapper must expose every diagnostic/runtime acceptance feature used by the executable.
     run_script = (ROOT / "scripts/run.ps1").read_text(encoding="utf-8")
-    for token in ["tangents", "StressReloads", "StressAlternateAsset", "StressResize", "ReportLiveObjects", "NoErrorDialog"]:
+    for token in ["tangents", "base-color", "metallic", "roughness", "emissive", "material-id", "Exposure", "StressReloads", "StressAlternateAsset", "StressResize", "ReportLiveObjects", "NoErrorDialog"]:
         if token not in run_script:
             fail(f"scripts/run.ps1 does not expose {token}", failures)
     for token in ["$InvocationDirectory = (Get-Location).Path", "Resolve-OutputPath $ImportReport $InvocationDirectory"]:

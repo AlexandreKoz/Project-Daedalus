@@ -4,7 +4,7 @@
 #include "core/Log.h"
 #include "core/Version.h"
 #include "graphics/D3D12Context.h"
-#include "graphics/DiagnosticSceneRenderer.h"
+#include "graphics/PbrSceneRenderer.h"
 #include "platform/Win32Window.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -183,8 +183,8 @@ void Application::load_scene()
     if (!options_.asset_path.has_value())
     {
         scene_ = make_builtin_triangle_scene();
-        import_report_ = make_import_report(scene_, ImportStatus::success, {}, "builtin-diagnostic-scene");
-        Log::info("No --asset was supplied; using the canonical built-in diagnostic triangle");
+        import_report_ = make_import_report(scene_, ImportStatus::success, {}, "builtin-canonical-scene");
+        Log::info("No --asset was supplied; using the canonical built-in triangle");
         if (options_.dump_scene)
         {
             const std::string hierarchy = dump_scene_hierarchy(scene_);
@@ -218,9 +218,10 @@ void Application::load_scene()
 
 void Application::create_renderer()
 {
-    renderer_ = std::make_unique<DiagnosticSceneRenderer>(
-        *graphics_, scene_, options_.diagnostic_mode,
-        shader_directory_ / "DiagnosticVS.dxil", shader_directory_ / "DiagnosticPS.dxil");
+    renderer_ = std::make_unique<PbrSceneRenderer>(
+        *graphics_, scene_, options_.diagnostic_mode, options_.exposure_ev,
+        shader_directory_ / "RasterPbrVS.dxil", shader_directory_ / "RasterPbrPS.dxil",
+        shader_directory_ / "ToneMapVS.dxil", shader_directory_ / "ToneMapPS.dxil");
 }
 
 void Application::reload_scene()
@@ -277,6 +278,7 @@ void Application::initialize()
     Log::info("Build type: " DAEDALUS_BUILD_TYPE);
     Log::info(std::string("Process architecture: ") + (sizeof(void*) == 8 ? "x64" : "non-x64"));
     Log::info("Diagnostic mode: " + std::string(to_string(options_.diagnostic_mode)));
+    Log::info("Exposure EV: " + std::to_string(options_.exposure_ev));
 
     const HRESULT com_result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(com_result)) throw std::runtime_error("CoInitializeEx failed for Windows graphics services");
@@ -288,7 +290,7 @@ void Application::initialize()
     dimensions << "Initial client dimensions: " << initial_width << 'x' << initial_height;
     Log::info(dimensions.str());
 
-    window_ = std::make_unique<Win32Window>(L"Project Daedalus - Campaign B Asset Viewer", initial_width, initial_height);
+    window_ = std::make_unique<Win32Window>(L"Project Daedalus - Campaign C1 PBR Viewer", initial_width, initial_height);
     graphics_ = std::make_unique<D3D12Context>(
         window_->native_handle(), window_->client_width(), window_->client_height(), options_.use_warp);
 
