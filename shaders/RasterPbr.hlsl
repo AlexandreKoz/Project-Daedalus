@@ -81,6 +81,7 @@ cbuffer DrawConstants : register(b1)
     float world_handedness;
     uint draw_padding0;
     uint draw_padding1;
+    uint draw_padding2;
 };
 
 cbuffer LightConstants : register(b2)

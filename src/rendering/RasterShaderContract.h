@@ -38,6 +38,9 @@ struct alignas(16) RasterDrawConstants
     float world_handedness = 1.0F;
     std::uint32_t padding0 = 0;
     std::uint32_t padding1 = 0;
+    // Explicit tail word keeps the 16-byte CPU/HLSL ABI size without relying on
+    // compiler-inserted tail padding (MSVC C4324 under /W4 /WX).
+    std::uint32_t padding2 = 0;
 };
 
 struct alignas(16) RasterLightGpu
