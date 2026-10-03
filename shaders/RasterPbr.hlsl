@@ -19,6 +19,8 @@ static const uint DIAGNOSTIC_METALLIC = 6u;
 static const uint DIAGNOSTIC_ROUGHNESS = 7u;
 static const uint DIAGNOSTIC_EMISSIVE = 8u;
 static const uint DIAGNOSTIC_MATERIAL_ID = 9u;
+static const uint DIAGNOSTIC_DEPTH = 10u;
+static const uint DIAGNOSTIC_OVERDRAW = 11u;
 
 struct VertexInput
 {
@@ -55,12 +57,13 @@ struct GpuLight
 cbuffer FrameConstants : register(b0)
 {
     column_major float4x4 view_projection;
+    column_major float4x4 shadow_view_projection;
     float4 camera_position;
-    float4 provisional_ambient;
+    float4 environment_shadow; // x IBL intensity; y constant bias; z normal bias; w inverse shadow size
     uint diagnostic_mode;
     uint light_count;
-    uint frame_padding0;
-    uint frame_padding1;
+    uint shadow_light_index;
+    uint frame_flags;
 };
 
 cbuffer DrawConstants : register(b1)
@@ -94,11 +97,13 @@ Texture2D<float4> metallic_roughness_texture : register(t1);
 Texture2D<float4> normal_texture : register(t2);
 Texture2D<float4> occlusion_texture : register(t3);
 Texture2D<float4> emissive_texture : register(t4);
+Texture2D<float> shadow_map : register(t5);
 SamplerState base_color_sampler : register(s0);
 SamplerState metallic_roughness_sampler : register(s1);
 SamplerState normal_sampler : register(s2);
 SamplerState occlusion_sampler : register(s3);
 SamplerState emissive_sampler : register(s4);
+SamplerComparisonState shadow_sampler : register(s5);
 
 float2 select_uv(uint set_index, float2 uv0, float2 uv1)
 {
@@ -116,6 +121,77 @@ float3 material_id_color(uint identifier)
         0.2 + 0.8 * float((hash >> 0u) & 255u) / 255.0,
         0.2 + 0.8 * float((hash >> 8u) & 255u) / 255.0,
         0.2 + 0.8 * float((hash >> 16u) & 255u) / 255.0);
+}
+
+
+float3 procedural_environment_radiance(float3 direction)
+{
+    const float3 d = normalize(direction);
+    const float sky_t = saturate(d.y * 0.5 + 0.5);
+    const float3 ground = float3(0.035, 0.028, 0.022);
+    const float3 horizon = float3(0.26, 0.31, 0.38);
+    const float3 zenith = float3(0.08, 0.18, 0.42);
+    float3 environment = d.y >= 0.0 ? lerp(horizon, zenith, pow(sky_t, 0.65))
+                                     : lerp(ground, horizon * 0.24, sky_t * 2.0);
+    const float3 sun_direction = normalize(float3(-0.35, 0.82, 0.45));
+    const float sun = pow(max(dot(d, sun_direction), 0.0), 512.0) * 18.0;
+    return environment + float3(1.0, 0.82, 0.58) * sun;
+}
+
+float3 procedural_diffuse_irradiance(float3 normal)
+{
+    const float hemi = saturate(normalize(normal).y * 0.5 + 0.5);
+    return lerp(float3(0.075, 0.060, 0.050), float3(0.34, 0.47, 0.72), hemi) * DAEDALUS_PI;
+}
+
+float3 procedural_prefiltered_specular(float3 reflection, float roughness)
+{
+    const float3 sharp = procedural_environment_radiance(reflection);
+    const float3 average = float3(0.15, 0.19, 0.27);
+    const float r = saturate(roughness);
+    const float blur = r * r * (3.0 - 2.0 * r);
+    return lerp(sharp, average, blur);
+}
+
+float2 environment_brdf_approximation(float n_dot_v, float roughness)
+{
+    const float4 c0 = float4(-1.0, -0.0275, -0.572, 0.022);
+    const float4 c1 = float4(1.0, 0.0425, 1.04, -0.04);
+    const float4 r = saturate(roughness) * c0 + c1;
+    const float a004 = min(r.x * r.x, exp2(-9.28 * saturate(n_dot_v))) * r.x + r.y;
+    return float2(-1.04, 1.04) * a004 + r.zw;
+}
+
+float3 fresnel_schlick_roughness(float3 f0, float n_dot_v, float roughness)
+{
+    return f0 + (max((1.0 - roughness).xxx, f0) - f0) * pow(saturate(1.0 - n_dot_v), 5.0);
+}
+
+float shadow_visibility(float3 world_position, float3 shading_normal, float3 light_direction)
+{
+    if ((frame_flags & 1u) == 0u || shadow_light_index == 0xffffffffu)
+        return 1.0;
+    const float4 clip = mul(shadow_view_projection, float4(world_position, 1.0));
+    if (clip.w <= 1.0e-20)
+        return 1.0;
+    const float3 ndc = clip.xyz / clip.w;
+    const float2 uv = float2(ndc.x * 0.5 + 0.5, -ndc.y * 0.5 + 0.5);
+    if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0 || ndc.z <= 0.0 || ndc.z >= 1.0)
+        return 1.0;
+    const float n_dot_l = saturate(dot(shading_normal, light_direction));
+    const float bias = environment_shadow.y + environment_shadow.z * (1.0 - n_dot_l);
+    const float compare_depth = ndc.z - bias;
+    float visibility = 0.0;
+    [unroll]
+    for (int y = -1; y <= 1; ++y)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; ++x)
+        {
+            visibility += shadow_map.SampleCmpLevelZero(shadow_sampler, uv + float2(x, y) * environment_shadow.w, compare_depth);
+        }
+    }
+    return visibility / 9.0;
 }
 
 VertexOutput VSMain(VertexInput input)
@@ -146,6 +222,11 @@ float4 PSMain(VertexOutput input, bool is_front_face : SV_IsFrontFace) : SV_Targ
 
     if (alpha_mode == 1u && base_color.a < roughness_normal_ao_cutoff.w)
         discard;
+
+    if (diagnostic_mode == DIAGNOSTIC_OVERDRAW)
+        return 1.0.xxxx;
+    if (diagnostic_mode == DIAGNOSTIC_DEPTH)
+        return float4(input.position.zzz, 1.0);
 
     const float4 metallic_roughness_sample = (flags & FLAG_METALLIC_ROUGHNESS_TEXTURE) != 0u
         ? metallic_roughness_texture.Sample(metallic_roughness_sampler,
@@ -252,22 +333,27 @@ float4 PSMain(VertexOutput input, bool is_front_face : SV_IsFrontFace) : SV_Targ
             }
         }
         if (attenuation <= 0.0) continue;
-        const float3 incident = light.color_intensity.rgb * (light.color_intensity.w * attenuation);
+        float visibility = 1.0;
+        if (index == shadow_light_index && light.type != 1u)
+            visibility = shadow_visibility(input.world_position, shading_normal, light_direction);
+        const float3 incident = light.color_intensity.rgb * (light.color_intensity.w * attenuation * visibility);
         direct += evaluate_brdf_times_n_dot_l(base_color.rgb, metallic, roughness,
                                                shading_normal, view_direction, light_direction) * incident;
     }
 
-    // C1 has no IBL. AO modulates only this explicit provisional indirect diffuse term;
-    // direct punctual lighting is intentionally unaffected. C2 replaces this term with IBL.
-    const float3 provisional_indirect = provisional_ambient.rgb * base_color.rgb * (1.0 - metallic) * ambient_occlusion;
-    float3 hdr_color = direct + provisional_indirect + emissive;
+    const float n_dot_v = saturate(dot(shading_normal, view_direction));
+    const float3 f0 = lerp(DAEDALUS_DIELECTRIC_F0.xxx, max(base_color.rgb, 0.0), metallic);
+    const float3 fresnel_ibl = fresnel_schlick_roughness(f0, n_dot_v, roughness);
+    const float3 diffuse_irradiance = procedural_diffuse_irradiance(shading_normal);
+    const float3 diffuse_ibl = diffuse_irradiance * max(base_color.rgb, 0.0) * (1.0 - metallic) * (1.0 - fresnel_ibl);
+    const float3 reflection = reflect(-view_direction, shading_normal);
+    const float3 prefiltered = procedural_prefiltered_specular(reflection, roughness);
+    const float2 brdf = environment_brdf_approximation(n_dot_v, roughness);
+    const float3 specular_ibl = prefiltered * (f0 * brdf.x + brdf.y);
+    const float3 indirect = (diffuse_ibl + specular_ibl) * ambient_occlusion * max(environment_shadow.x, 0.0);
+    const float3 hdr_color = direct + indirect + emissive;
     const float output_alpha = alpha_mode == 2u ? saturate(base_color.a) : 1.0;
-    // The scene target is R16G16B16A16_FLOAT. Make arithmetic failures conspicuous rather
-    // than storing NaN/Inf, and clamp only finite values that exceed the target's representable
-    // maximum. This is a storage-format boundary, not tone-map concealment.
-    if (any(isnan(hdr_color)) || any(isinf(hdr_color)))
-        hdr_color = float3(65504.0, 0.0, 65504.0);
-    else
-        hdr_color = min(max(hdr_color, 0.0), 65504.0.xxx);
+    // Validation intentionally preserves NaN/Inf in the HDR target. ToneMap.hlsl makes
+    // non-finite presentation conspicuous, while --validate-hdr performs the authoritative readback scan.
     return float4(hdr_color, output_alpha);
 }

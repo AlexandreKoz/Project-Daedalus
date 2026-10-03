@@ -113,7 +113,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
-    output = args.output or root.parent / "Project-Daedalus-Campaign-C1-PBR-source.zip"
+    output = args.output or root.parent / "Project-Daedalus-Campaign-C2-Raster-source.zip"
     try:
         digest, count = write_archive(root, output.resolve())
     except (OSError, RuntimeError, zipfile.BadZipFile) as error:

@@ -29,7 +29,11 @@ float4 PSMain(FullscreenVertexOutput input) : SV_Target0
     const int2 pixel = int2(input.position.xy);
     const float4 source = scene_color.Load(int3(pixel, 0));
     float3 linear_display;
-    if (diagnostic_mode == 0u)
+    if (any(isnan(source.rgb)) || any(isinf(source.rgb)))
+    {
+        linear_display = float3(1.0, 0.0, 1.0);
+    }
+    else if (diagnostic_mode == 0u)
     {
         const float3 exposed = max(source.rgb, 0.0) * exp2(clamp(exposure_ev, -24.0, 24.0));
         linear_display = aces_fitted(exposed);

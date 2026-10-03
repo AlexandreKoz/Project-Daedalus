@@ -1,0 +1,12 @@
+{
+  "schema": "daedalus.campaign-c-regression-thresholds/1",
+  "domain": "linear-srgb-rgb",
+  "defaults": {
+    "mae": 0.004,
+    "rmse": 0.008,
+    "maximum_absolute_error": 0.08,
+    "per_channel_threshold": 0.02,
+    "maximum_fraction_over_threshold": 0.01
+  },
+  "policy": "Thresholds are reviewed per feature before reference promotion; normal regression runs never rewrite goldens."
+}

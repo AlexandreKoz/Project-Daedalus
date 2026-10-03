@@ -65,6 +65,7 @@ public:
     [[nodiscard]] std::string feature_level_name() const;
     [[nodiscard]] bool debug_layer_enabled() const noexcept;
     [[nodiscard]] bool using_warp() const noexcept;
+    [[nodiscard]] std::uint64_t timestamp_frequency() const noexcept;
     [[nodiscard]] static bool report_live_objects() noexcept;
 
 private:

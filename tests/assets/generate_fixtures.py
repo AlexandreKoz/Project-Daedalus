@@ -518,6 +518,153 @@ write_c1("c1_spot_light.gltf", c1_base_document(
     lights=[{"name":"SpotCone","type":"spot","color":[1.0,1.0,1.0],"intensity":60.0,"range":5.0,
              "spot":{"innerConeAngle":0.2,"outerConeAngle":0.5}}]))
 
+
+# Campaign C2 controlled reference scenes. All geometry, textures, and lighting are
+# generated here and are CC0/self-authored so reference provenance is reproducible.
+def c2_mesh_document(positions: list[tuple[float,float,float]], normals: list[tuple[float,float,float]],
+                     uvs: list[tuple[float,float]], tangents: list[tuple[float,float,float,float]],
+                     indices: list[int]) -> tuple[dict, list[dict], list[dict]]:
+    payloads = [
+        b"".join(struct.pack("<3f", *v) for v in positions),
+        b"".join(struct.pack("<3f", *v) for v in normals),
+        b"".join(struct.pack("<2f", *v) for v in uvs),
+        b"".join(struct.pack("<4f", *v) for v in tangents),
+        b"".join(struct.pack("<H", i) for i in indices),
+    ]
+    blob = b""
+    views: list[dict] = []
+    for payload in payloads:
+        blob = align4(blob)
+        offset = len(blob)
+        blob += payload
+        views.append({"buffer":0,"byteOffset":offset,"byteLength":len(payload)})
+    accessors = [
+        {"bufferView":0,"componentType":5126,"count":len(positions),"type":"VEC3"},
+        {"bufferView":1,"componentType":5126,"count":len(normals),"type":"VEC3"},
+        {"bufferView":2,"componentType":5126,"count":len(uvs),"type":"VEC2"},
+        {"bufferView":3,"componentType":5126,"count":len(tangents),"type":"VEC4"},
+        {"bufferView":4,"componentType":5123,"count":len(indices),"type":"SCALAR"},
+    ]
+    base = {"buffers":[{"uri":data_uri(blob),"byteLength":len(blob)}],"bufferViews":views,"accessors":accessors}
+    attrs={"POSITION":0,"NORMAL":1,"TEXCOORD_0":2,"TANGENT":3}
+    return base, accessors, [{"attributes":attrs,"indices":4}]
+
+
+def cube_geometry() -> tuple[list, list, list, list, list]:
+    # 24 vertices keep face normals/UVs/tangents explicit and deterministic.
+    faces = [
+        ((0,0,1),(1,0,0), [(-1,-1,1),(1,-1,1),(1,1,1),(-1,1,1)]),
+        ((0,0,-1),(-1,0,0), [(1,-1,-1),(-1,-1,-1),(-1,1,-1),(1,1,-1)]),
+        ((1,0,0),(0,0,-1), [(1,-1,1),(1,-1,-1),(1,1,-1),(1,1,1)]),
+        ((-1,0,0),(0,0,1), [(-1,-1,-1),(-1,-1,1),(-1,1,1),(-1,1,-1)]),
+        ((0,1,0),(1,0,0), [(-1,1,1),(1,1,1),(1,1,-1),(-1,1,-1)]),
+        ((0,-1,0),(1,0,0), [(-1,-1,-1),(1,-1,-1),(1,-1,1),(-1,-1,1)]),
+    ]
+    pos=[]; norm=[]; uv=[]; tan=[]; idx=[]
+    face_uv=[(0,1),(1,1),(1,0),(0,0)]
+    for n,t,verts in faces:
+        b=len(pos); pos.extend(verts); norm.extend([n]*4); uv.extend(face_uv); tan.extend([(t[0],t[1],t[2],1.0)]*4)
+        idx.extend([b,b+1,b+2,b,b+2,b+3])
+    return pos,norm,uv,tan,idx
+
+
+def sphere_geometry(stacks: int=10, slices: int=16) -> tuple[list, list, list, list, list]:
+    pos=[]; norm=[]; uv=[]; tan=[]; idx=[]
+    for y in range(stacks+1):
+        v=y/stacks; theta=v*math.pi
+        st,ct=math.sin(theta),math.cos(theta)
+        for x in range(slices+1):
+            u=x/slices; phi=u*2*math.pi
+            sp,cp=math.sin(phi),math.cos(phi)
+            n=(st*cp,ct,st*sp)
+            pos.append(n); norm.append(n); uv.append((u,1-v)); tan.append((-sp,0.0,cp,1.0))
+    row=slices+1
+    for y in range(stacks):
+        for x in range(slices):
+            a=y*row+x; b=a+row
+            idx.extend([a,b,a+1,a+1,b,b+1])
+    return pos,norm,uv,tan,idx
+
+# Textured cube: UV/depth/transform/camera-motion reference.
+cube_pos,cube_norm,cube_uv,cube_tan,cube_idx=cube_geometry()
+cube_base,_,cube_prims=c2_mesh_document(cube_pos,cube_norm,cube_uv,cube_tan,cube_idx)
+checker=png_rgba(4,4,bytes(sum(([220,220,220,255] if (x+y)%2==0 else [35,90,180,255] for y in range(4) for x in range(4)), [])))
+c2_cube={"asset":{"version":"2.0","generator":"Daedalus Campaign C2 fixture generator","copyright":"CC0 self-authored fixture"},**cube_base,
+ "images":[{"uri":data_uri(checker,"image/png"),"name":"C2Checker"}],"samplers":[{"magFilter":9729,"minFilter":9729,"wrapS":10497,"wrapT":10497}],"textures":[{"source":0,"sampler":0}],
+ "materials":[{"name":"TexturedCube","pbrMetallicRoughness":{"baseColorTexture":{"index":0},"metallicFactor":0.0,"roughnessFactor":0.55}}],
+ "meshes":[{"name":"TexturedCube","primitives":[{**cube_prims[0],"material":0}]}],
+ "extensionsUsed":["KHR_lights_punctual"],"extensions":{"KHR_lights_punctual":{"lights":[{"name":"Key","type":"directional","intensity":3.0}]}},
+ "nodes":[{"mesh":0,"rotation":[0.0,0.258819,0.0,0.965926]},{"extensions":{"KHR_lights_punctual":{"light":0}},"rotation":[-0.382683,0,0,0.92388]}],
+ "scenes":[{"name":"C2TexturedCube","nodes":[0,1]}],"scene":0}
+write_c1("c2_textured_cube.gltf",c2_cube)
+
+# Material sphere grid: 5x5 metallic/roughness matrix sharing deterministic sphere accessors.
+sp, sn, suv, stan, sidx=sphere_geometry()
+sphere_base,_,sphere_prims=c2_mesh_document(sp,sn,suv,stan,sidx)
+materials=[]; meshes=[]; nodes=[]
+for row in range(5):
+    for col in range(5):
+        mi=len(materials); metallic=col/4.0; rough=max(0.04,row/4.0)
+        materials.append({"name":f"M{metallic:.2f}_R{rough:.2f}","pbrMetallicRoughness":{"baseColorFactor":[0.72,0.32,0.12,1.0],"metallicFactor":metallic,"roughnessFactor":rough}})
+        meshes.append({"name":f"Sphere_{row}_{col}","primitives":[{**sphere_prims[0],"material":mi}]})
+        nodes.append({"mesh":mi,"translation":[(col-2)*2.35,(2-row)*2.35,0.0],"scale":[0.9,0.9,0.9]})
+light_index=len(nodes); nodes.append({"extensions":{"KHR_lights_punctual":{"light":0}},"rotation":[-0.258819,0.0,0.0,0.965926]})
+c2_grid={"asset":{"version":"2.0","generator":"Daedalus Campaign C2 fixture generator","copyright":"CC0 self-authored fixture"},**sphere_base,
+ "materials":materials,"meshes":meshes,"extensionsUsed":["KHR_lights_punctual"],"extensions":{"KHR_lights_punctual":{"lights":[{"name":"GridKey","type":"directional","intensity":2.5}]}},
+ "nodes":nodes,"scenes":[{"name":"C2MaterialSphereGrid","nodes":list(range(len(nodes)))}],"scene":0}
+write_c1("c2_material_sphere_grid.gltf",c2_grid)
+
+# Production-style controlled asset: several instanced cube materials and an emissive accent.
+prod_materials=[
+ {"name":"Paint","pbrMetallicRoughness":{"baseColorFactor":[0.1,0.28,0.65,1],"metallicFactor":0.05,"roughnessFactor":0.35}},
+ {"name":"Metal","pbrMetallicRoughness":{"baseColorFactor":[0.65,0.68,0.72,1],"metallicFactor":1.0,"roughnessFactor":0.22}},
+ {"name":"Rubber","pbrMetallicRoughness":{"baseColorFactor":[0.025,0.025,0.03,1],"metallicFactor":0.0,"roughnessFactor":0.9}},
+ {"name":"Lamp","pbrMetallicRoughness":{"baseColorFactor":[0.1,0.08,0.03,1],"metallicFactor":0.0,"roughnessFactor":0.4},"emissiveFactor":[1.0,0.6,0.15]},
+]
+prod_meshes=[{"name":m["name"],"primitives":[{**cube_prims[0],"material":i}]} for i,m in enumerate(prod_materials)]
+prod_nodes=[
+ {"mesh":0,"translation":[0,0,0],"scale":[2.5,0.55,1.4]},
+ {"mesh":1,"translation":[-1.5,0.9,0],"scale":[0.55,0.55,0.55]},
+ {"mesh":1,"translation":[1.5,0.9,0],"scale":[0.55,0.55,0.55]},
+ {"mesh":2,"translation":[0,-0.8,0],"scale":[2.1,0.22,1.1]},
+ {"mesh":3,"translation":[0,1.2,0.9],"scale":[0.45,0.18,0.18]},
+ {"extensions":{"KHR_lights_punctual":{"light":0}},"translation":[0,3,3],"rotation":[-0.382683,0,0,0.92388]},
+]
+c2_prod={"asset":{"version":"2.0","generator":"Daedalus Campaign C2 fixture generator","copyright":"CC0 self-authored fixture"},**cube_base,
+ "materials":prod_materials,"meshes":prod_meshes,"extensionsUsed":["KHR_lights_punctual"],"extensions":{"KHR_lights_punctual":{"lights":[{"name":"StudioSpot","type":"spot","intensity":120.0,"range":12.0,"spot":{"innerConeAngle":0.25,"outerConeAngle":0.65}}]}},
+ "nodes":prod_nodes,"scenes":[{"name":"C2ProductionAsset","nodes":list(range(len(prod_nodes)))}],"scene":0}
+write_c1("c2_pbr_production_asset.gltf",c2_prod)
+
+# Architectural interior: room shell, occluders, multiple materials/lights, deliberate depth complexity.
+room_materials=[
+ {"name":"Wall","pbrMetallicRoughness":{"baseColorFactor":[0.72,0.70,0.66,1],"metallicFactor":0,"roughnessFactor":0.9}},
+ {"name":"Floor","pbrMetallicRoughness":{"baseColorFactor":[0.22,0.18,0.14,1],"metallicFactor":0,"roughnessFactor":0.65}},
+ {"name":"Red","pbrMetallicRoughness":{"baseColorFactor":[0.65,0.08,0.05,1],"metallicFactor":0.05,"roughnessFactor":0.45}},
+ {"name":"Metal","pbrMetallicRoughness":{"baseColorFactor":[0.55,0.58,0.62,1],"metallicFactor":1,"roughnessFactor":0.3}},
+]
+room_meshes=[{"name":m["name"],"primitives":[{**cube_prims[0],"material":i}]} for i,m in enumerate(room_materials)]
+room_nodes=[
+ {"mesh":1,"translation":[0,-2.6,0],"scale":[5.0,0.12,5.0]},
+ {"mesh":0,"translation":[0,2.4,-4.9],"scale":[5.0,5.0,0.12]},
+ {"mesh":0,"translation":[-4.9,2.4,0],"scale":[0.12,5.0,5.0]},
+ {"mesh":0,"translation":[4.9,2.4,0],"scale":[0.12,5.0,5.0]},
+ {"mesh":2,"translation":[-1.7,-1.2,-0.3],"scale":[1.0,1.4,1.0]},
+ {"mesh":3,"translation":[1.4,-1.6,0.9],"scale":[1.2,1.0,1.2]},
+ {"mesh":0,"translation":[0,-0.8,-2.2],"scale":[0.55,1.8,0.55]},
+ {"extensions":{"KHR_lights_punctual":{"light":0}},"translation":[0,3.8,2.8],"rotation":[-0.382683,0,0,0.92388]},
+ {"extensions":{"KHR_lights_punctual":{"light":1}},"translation":[-2.5,1.4,1.5]},
+ {"extensions":{"KHR_lights_punctual":{"light":2}},"rotation":[-0.258819,0.0,0.0,0.965926]},
+]
+room_lights=[
+ {"name":"InteriorSpot","type":"spot","color":[1.0,0.88,0.72],"intensity":180.0,"range":14.0,"spot":{"innerConeAngle":0.25,"outerConeAngle":0.7}},
+ {"name":"FillPoint","type":"point","color":[0.45,0.62,1.0],"intensity":55.0,"range":8.0},
+ {"name":"WindowDirectional","type":"directional","color":[0.72,0.82,1.0],"intensity":1.0},
+]
+c2_room={"asset":{"version":"2.0","generator":"Daedalus Campaign C2 fixture generator","copyright":"CC0 self-authored fixture"},**cube_base,
+ "materials":room_materials,"meshes":room_meshes,"extensionsUsed":["KHR_lights_punctual"],"extensions":{"KHR_lights_punctual":{"lights":room_lights}},
+ "nodes":room_nodes,"scenes":[{"name":"C2ArchitecturalInterior","nodes":list(range(len(room_nodes)))}],"scene":0}
+write_c1("c2_architectural_interior.gltf",c2_room)
+
 # Structurally valid PNG chunks whose IDAT payload does not begin with a legal
 # PNG zlib/DEFLATE stream. Some Windows WIC versions are permissive here, so the
 # importer validates the zlib envelope before backend-specific pixel decode.
@@ -647,7 +794,9 @@ manifest = {
         "c1_base_color_factor.gltf", "c1_srgb_base_color.gltf", "c1_metallic_roughness.gltf",
         "c1_normal_map.gltf", "c1_tangent_negative_scale.gltf", "c1_emissive.gltf", "c1_occlusion.gltf",
         "c1_alpha_modes.gltf", "c1_double_sided.gltf", "c1_directional_light.gltf",
-        "c1_point_light.gltf", "c1_spot_light.gltf"
+        "c1_point_light.gltf", "c1_spot_light.gltf",
+        "c2_textured_cube.gltf", "c2_material_sphere_grid.gltf",
+        "c2_pbr_production_asset.gltf", "c2_architectural_interior.gltf"
     ],
     "invalid": [
         "malformed_json.gltf", "corrupted_header.glb", "missing_buffer.gltf", "missing_image.gltf",
@@ -660,4 +809,4 @@ manifest = {
     ],
 }
 (ROOT / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-print("Generated Campaign B + Campaign C1 fixtures")
+print("Generated Campaign B + Campaign C1/C2 fixtures")

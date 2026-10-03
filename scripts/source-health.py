@@ -38,14 +38,15 @@ def main() -> int:
                 if "#define WIN32_LEAN_AND_MEAN" not in prefix:
                     fail(f"{path.relative_to(ROOT)} includes Windows.h without defining WIN32_LEAN_AND_MEAN first", failures)
 
-    # Guard the Campaign C1 CPU/HLSL constant-buffer ABI and stable material-ID contract.
+    # Guard the Campaign C CPU/HLSL constant-buffer ABI and stable material-ID contract.
     contract = (ROOT / "src/rendering/RasterShaderContract.h").read_text(encoding="utf-8")
     shader = (ROOT / "shaders/RasterPbr.hlsl").read_text(encoding="utf-8")
     required_cpu = [
         "struct alignas(16) RasterFrameConstants",
         "struct alignas(16) RasterDrawConstants",
         "struct alignas(16) RasterLightGpu",
-        "sizeof(RasterFrameConstants) == 112",
+        "sizeof(RasterFrameConstants) == 176",
+        "sizeof(ShadowFrameConstants) == 64",
         "sizeof(RasterDrawConstants) == 224",
         "offsetof(RasterDrawConstants, world_handedness) == 208",
         "sizeof(RasterLightGpu) == 64",
@@ -64,6 +65,11 @@ def main() -> int:
         if token not in shader:
             fail(f"RasterPbr.hlsl missing ABI field/contract: {token}", failures)
 
+    shadow_shader = (ROOT / "shaders/Shadow.hlsl").read_text(encoding="utf-8")
+    for token in ["cbuffer ShadowFrameConstants : register(b0)", "cbuffer DrawConstants : register(b1)", "discard"]:
+        if token not in shadow_shader:
+            fail(f"Shadow.hlsl missing Campaign C2 shadow contract: {token}", failures)
+
     preparation = (ROOT / "src/rendering/RasterPreparation.cpp").read_text(encoding="utf-8")
     for token in ["return kDefaultMaterialDiagnosticId;", "return material.value() + 1U;"]:
         if token not in preparation:
@@ -71,7 +77,10 @@ def main() -> int:
 
     # The PowerShell wrapper must expose every diagnostic/runtime acceptance feature used by the executable.
     run_script = (ROOT / "scripts/run.ps1").read_text(encoding="utf-8")
-    for token in ["tangents", "base-color", "metallic", "roughness", "emissive", "material-id", "Exposure", "StressReloads", "StressAlternateAsset", "StressResize", "ReportLiveObjects", "NoErrorDialog"]:
+    for token in ["tangents", "base-color", "metallic", "roughness", "emissive", "material-id", "depth", "overdraw",
+                  "Exposure", "EnvironmentIntensity", "ShadowBias", "ShadowNormalBias", "Capture", "CaptureMetadata",
+                  "CaptureFrame", "ValidateHdr", "BenchmarkOutput", "BenchmarkWarmup", "StressReloads",
+                  "StressAlternateAsset", "StressResize", "ReportLiveObjects", "NoErrorDialog"]:
         if token not in run_script:
             fail(f"scripts/run.ps1 does not expose {token}", failures)
     for token in ["$InvocationDirectory = (Get-Location).Path", "Resolve-OutputPath $ImportReport $InvocationDirectory"]:

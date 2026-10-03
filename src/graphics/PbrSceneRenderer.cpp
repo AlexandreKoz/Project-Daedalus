@@ -2,6 +2,7 @@
 
 #include "core/Error.h"
 #include "core/Log.h"
+#include "rendering/CampaignC2Math.h"
 
 #include <algorithm>
 #include <array>
@@ -29,7 +30,11 @@ constexpr std::uint32_t kRootFrameConstants = 0U;
 constexpr std::uint32_t kRootDrawConstants = 1U;
 constexpr std::uint32_t kRootLightConstants = 2U;
 constexpr std::uint32_t kRootSrvBase = 3U;
-constexpr std::uint32_t kRootSamplerBase = 8U;
+constexpr std::uint32_t kRootSamplerBase = 9U;
+constexpr std::uint32_t kRootShadowSrv = kRootSrvBase + 5U;
+constexpr std::uint32_t kRootShadowSampler = kRootSamplerBase + 5U;
+constexpr std::uint32_t kShadowMapSize = 2048U;
+constexpr std::uint32_t kTimestampCountPerFrame = 5U;
 constexpr std::uint32_t kToneRootSrv = 0U;
 constexpr std::uint32_t kToneRootConstants = 1U;
 constexpr std::uint32_t kRasterFlagBoundsOverlay = 1U << 8U;
@@ -177,6 +182,8 @@ struct FilterBits
     case DiagnosticMode::roughness: return 7U;
     case DiagnosticMode::emissive: return 8U;
     case DiagnosticMode::material_id: return 9U;
+    case DiagnosticMode::depth: return 10U;
+    case DiagnosticMode::overdraw: return 11U;
     }
     return 0U;
 }
@@ -210,21 +217,44 @@ struct FilterBits
     target.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
     return description;
 }
+
+[[nodiscard]] D3D12_BLEND_DESC additive_blend_description() noexcept
+{
+    D3D12_BLEND_DESC description{};
+    auto& target = description.RenderTarget[0];
+    target.BlendEnable = TRUE;
+    target.SrcBlend = D3D12_BLEND_ONE;
+    target.DestBlend = D3D12_BLEND_ONE;
+    target.BlendOp = D3D12_BLEND_OP_ADD;
+    target.SrcBlendAlpha = D3D12_BLEND_ONE;
+    target.DestBlendAlpha = D3D12_BLEND_ONE;
+    target.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+    target.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    return description;
+}
 }
 
 PbrSceneRenderer::PbrSceneRenderer(D3D12Context& context,
                                    const CanonicalScene& scene,
                                    DiagnosticMode mode,
                                    float exposure_ev,
+                                   float environment_intensity,
+                                   bool shadows_enabled,
+                                   float shadow_constant_bias,
+                                   float shadow_normal_bias,
                                    const std::filesystem::path& raster_vertex_shader,
                                    const std::filesystem::path& raster_pixel_shader,
                                    const std::filesystem::path& tone_vertex_shader,
-                                   const std::filesystem::path& tone_pixel_shader)
+                                   const std::filesystem::path& tone_pixel_shader,
+                                   const std::filesystem::path& shadow_vertex_shader,
+                                   const std::filesystem::path& shadow_pixel_shader)
     : context_(context),
       device_(context.device()),
       scene_(scene),
       mode_(mode),
       exposure_ev_(exposure_ev),
+      environment_intensity_(environment_intensity),
+      shadows_enabled_(shadows_enabled),
       camera_(scene.selected_scene.valid() && scene.selected_scene.value() < scene.scenes.size()
                   ? scene.scenes[scene.selected_scene.value()].bounds
                   : Aabb{}),
@@ -235,15 +265,25 @@ PbrSceneRenderer::PbrSceneRenderer(D3D12Context& context,
     if (device_ == nullptr) throw std::invalid_argument("PbrSceneRenderer requires a D3D12 device");
     if (!std::isfinite(exposure_ev_) || exposure_ev_ < -24.0F || exposure_ev_ > 24.0F)
         throw std::invalid_argument("PBR exposure must be finite and within [-24, +24] EV");
+    if (!std::isfinite(environment_intensity_) || environment_intensity_ < 0.0F || environment_intensity_ > 64.0F)
+        throw std::invalid_argument("IBL environment intensity must be finite and within [0, 64]");
+    if (!std::isfinite(shadow_constant_bias) || shadow_constant_bias < 0.0F || shadow_constant_bias > 0.05F ||
+        !std::isfinite(shadow_normal_bias) || shadow_normal_bias < 0.0F || shadow_normal_bias > 0.05F)
+        throw std::invalid_argument("shadow bias values must be finite and within [0, 0.05]");
 
     create_root_signatures();
-    create_pipeline_states(raster_vertex_shader, raster_pixel_shader, tone_vertex_shader, tone_pixel_shader);
+    create_pipeline_states(raster_vertex_shader, raster_pixel_shader, tone_vertex_shader, tone_pixel_shader,
+                           shadow_vertex_shader, shadow_pixel_shader);
     create_descriptor_heaps();
     create_textures_and_samplers();
     create_geometry();
     create_draw_items();
+    shadow_projection_.constant_bias = shadow_constant_bias;
+    shadow_projection_.normal_bias = shadow_normal_bias;
+    create_shadow_resources();
     create_bounds_geometry();
     create_constant_buffers();
+    create_timing_resources();
     create_depth_buffer(viewport_width_, viewport_height_);
     create_hdr_target(viewport_width_, viewport_height_);
 
@@ -252,6 +292,8 @@ PbrSceneRenderer::PbrSceneRenderer(D3D12Context& context,
            << " primitives=" << primitives_.size()
            << " textures=" << scene_.textures.size()
            << " punctual_lights=" << lights_.size()
+           << " shadow_light=" << (shadow_projection_.enabled ? std::to_string(shadow_projection_.light_index) : std::string("none"))
+           << " environment_intensity=" << environment_intensity_
            << " exposure_ev=" << exposure_ev_
            << " diagnostic=" << to_string(mode_);
     Log::info(stream.str());
@@ -274,12 +316,22 @@ PbrSceneRenderer::~PbrSceneRenderer()
         draw_constant_buffer_->Unmap(0, nullptr);
         mapped_draw_constants_ = nullptr;
     }
+    if (shadow_frame_constant_buffer_ != nullptr && mapped_shadow_frame_constants_ != nullptr)
+    {
+        shadow_frame_constant_buffer_->Unmap(0, nullptr);
+        mapped_shadow_frame_constants_ = nullptr;
+    }
+    if (timestamp_readback_ != nullptr && mapped_timestamps_ != nullptr)
+    {
+        timestamp_readback_->Unmap(0, nullptr);
+        mapped_timestamps_ = nullptr;
+    }
 }
 
 void PbrSceneRenderer::create_root_signatures()
 {
-    std::array<D3D12_DESCRIPTOR_RANGE, 10> ranges{};
-    for (std::uint32_t index = 0; index < 5U; ++index)
+    std::array<D3D12_DESCRIPTOR_RANGE, 12> ranges{};
+    for (std::uint32_t index = 0; index < 6U; ++index)
     {
         auto& range = ranges[index];
         range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
@@ -288,9 +340,9 @@ void PbrSceneRenderer::create_root_signatures()
         range.RegisterSpace = 0;
         range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
     }
-    for (std::uint32_t index = 0; index < 5U; ++index)
+    for (std::uint32_t index = 0; index < 6U; ++index)
     {
-        auto& range = ranges[5U + index];
+        auto& range = ranges[6U + index];
         range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
         range.NumDescriptors = 1;
         range.BaseShaderRegister = index;
@@ -298,14 +350,14 @@ void PbrSceneRenderer::create_root_signatures()
         range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
     }
 
-    std::array<D3D12_ROOT_PARAMETER, 13> parameters{};
+    std::array<D3D12_ROOT_PARAMETER, 15> parameters{};
     for (std::uint32_t index = 0; index < 3U; ++index)
     {
         parameters[index].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
         parameters[index].Descriptor.ShaderRegister = index;
         parameters[index].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
     }
-    for (std::uint32_t index = 0; index < 5U; ++index)
+    for (std::uint32_t index = 0; index < 6U; ++index)
     {
         parameters[kRootSrvBase + index].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         parameters[kRootSrvBase + index].DescriptorTable.NumDescriptorRanges = 1;
@@ -313,7 +365,7 @@ void PbrSceneRenderer::create_root_signatures()
         parameters[kRootSrvBase + index].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
         parameters[kRootSamplerBase + index].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         parameters[kRootSamplerBase + index].DescriptorTable.NumDescriptorRanges = 1;
-        parameters[kRootSamplerBase + index].DescriptorTable.pDescriptorRanges = &ranges[5U + index];
+        parameters[kRootSamplerBase + index].DescriptorTable.pDescriptorRanges = &ranges[6U + index];
         parameters[kRootSamplerBase + index].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     }
 
@@ -336,6 +388,50 @@ void PbrSceneRenderer::create_root_signatures()
     }
     DAEDALUS_THROW_IF_FAILED(device_->CreateRootSignature(
         0, serialized->GetBufferPointer(), serialized->GetBufferSize(), IID_PPV_ARGS(&raster_root_signature_)));
+
+    D3D12_DESCRIPTOR_RANGE shadow_srv_range{};
+    shadow_srv_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    shadow_srv_range.NumDescriptors = 1;
+    shadow_srv_range.BaseShaderRegister = 0;
+    shadow_srv_range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+    D3D12_DESCRIPTOR_RANGE shadow_sampler_range{};
+    shadow_sampler_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+    shadow_sampler_range.NumDescriptors = 1;
+    shadow_sampler_range.BaseShaderRegister = 0;
+    shadow_sampler_range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+    std::array<D3D12_ROOT_PARAMETER, 4> shadow_parameters{};
+    shadow_parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    shadow_parameters[0].Descriptor.ShaderRegister = 0;
+    shadow_parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+    shadow_parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    shadow_parameters[1].Descriptor.ShaderRegister = 1;
+    shadow_parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    shadow_parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    shadow_parameters[2].DescriptorTable.NumDescriptorRanges = 1;
+    shadow_parameters[2].DescriptorTable.pDescriptorRanges = &shadow_srv_range;
+    shadow_parameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    shadow_parameters[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    shadow_parameters[3].DescriptorTable.NumDescriptorRanges = 1;
+    shadow_parameters[3].DescriptorTable.pDescriptorRanges = &shadow_sampler_range;
+    shadow_parameters[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    D3D12_ROOT_SIGNATURE_DESC shadow_description{};
+    shadow_description.NumParameters = static_cast<UINT>(shadow_parameters.size());
+    shadow_description.pParameters = shadow_parameters.data();
+    shadow_description.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
+                               D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
+                               D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+                               D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
+    serialized.Reset();
+    errors.Reset();
+    result = D3D12SerializeRootSignature(&shadow_description, D3D_ROOT_SIGNATURE_VERSION_1, &serialized, &errors);
+    if (FAILED(result))
+    {
+        const std::string details = errors == nullptr ? std::string{} :
+            std::string(static_cast<const char*>(errors->GetBufferPointer()), errors->GetBufferSize());
+        throw ResultError(static_cast<ResultCode>(result), "D3D12SerializeRootSignature(shadow): " + details);
+    }
+    DAEDALUS_THROW_IF_FAILED(device_->CreateRootSignature(
+        0, serialized->GetBufferPointer(), serialized->GetBufferSize(), IID_PPV_ARGS(&shadow_root_signature_)));
 
     D3D12_DESCRIPTOR_RANGE tone_range{};
     tone_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
@@ -374,7 +470,9 @@ void PbrSceneRenderer::create_root_signatures()
 void PbrSceneRenderer::create_pipeline_states(const std::filesystem::path& raster_vertex_shader,
                                               const std::filesystem::path& raster_pixel_shader,
                                               const std::filesystem::path& tone_vertex_shader,
-                                              const std::filesystem::path& tone_pixel_shader)
+                                              const std::filesystem::path& tone_pixel_shader,
+                                              const std::filesystem::path& shadow_vertex_shader,
+                                              const std::filesystem::path& shadow_pixel_shader)
 {
     const std::vector<std::byte> raster_vertex_bytes = read_binary_file(raster_vertex_shader);
     const std::vector<std::byte> raster_pixel_bytes = read_binary_file(raster_pixel_shader);
@@ -432,6 +530,60 @@ void PbrSceneRenderer::create_pipeline_states(const std::filesystem::path& raste
                            raster_pipelines_[static_cast<std::size_t>(PsoIndex::blend_double_negative)]);
     create_raster_pipeline(false, true, false, D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE, D3D12_DEPTH_WRITE_MASK_ZERO, line_pipeline_);
 
+    for (std::size_t index = 0; index < overdraw_pipelines_.size(); ++index)
+    {
+        const bool double_sided = (index & 2U) != 0U;
+        const bool negative = (index & 1U) != 0U;
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC description{};
+        description.pRootSignature = raster_root_signature_.Get();
+        description.VS = {raster_vertex_bytes.data(), raster_vertex_bytes.size()};
+        description.PS = {raster_pixel_bytes.data(), raster_pixel_bytes.size()};
+        description.BlendState = additive_blend_description();
+        description.SampleMask = UINT_MAX;
+        description.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+        description.RasterizerState.CullMode = double_sided ? D3D12_CULL_MODE_NONE : D3D12_CULL_MODE_BACK;
+        description.RasterizerState.FrontCounterClockwise = negative ? FALSE : TRUE;
+        description.RasterizerState.DepthClipEnable = TRUE;
+        description.DepthStencilState.DepthEnable = FALSE;
+        description.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+        description.DepthStencilState.StencilEnable = FALSE;
+        description.InputLayout = {input_layout, static_cast<UINT>(std::size(input_layout))};
+        description.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        description.NumRenderTargets = 1;
+        description.RTVFormats[0] = kHdrFormat;
+        description.SampleDesc.Count = 1;
+        DAEDALUS_THROW_IF_FAILED(device_->CreateGraphicsPipelineState(&description, IID_PPV_ARGS(&overdraw_pipelines_[index])));
+    }
+
+    const std::vector<std::byte> shadow_vertex_bytes = read_binary_file(shadow_vertex_shader);
+    const std::vector<std::byte> shadow_pixel_bytes = read_binary_file(shadow_pixel_shader);
+    for (std::size_t index = 0; index < shadow_pipelines_.size(); ++index)
+    {
+        const bool double_sided = (index & 2U) != 0U;
+        const bool negative = (index & 1U) != 0U;
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC description{};
+        description.pRootSignature = shadow_root_signature_.Get();
+        description.VS = {shadow_vertex_bytes.data(), shadow_vertex_bytes.size()};
+        description.PS = {shadow_pixel_bytes.data(), shadow_pixel_bytes.size()};
+        description.BlendState = blend_description(false);
+        description.SampleMask = UINT_MAX;
+        description.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+        description.RasterizerState.CullMode = double_sided ? D3D12_CULL_MODE_NONE : D3D12_CULL_MODE_BACK;
+        description.RasterizerState.FrontCounterClockwise = negative ? FALSE : TRUE;
+        description.RasterizerState.DepthBias = 0;
+        description.RasterizerState.SlopeScaledDepthBias = 0.0F;
+        description.RasterizerState.DepthClipEnable = TRUE;
+        description.DepthStencilState.DepthEnable = TRUE;
+        description.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+        description.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+        description.InputLayout = {input_layout, static_cast<UINT>(std::size(input_layout))};
+        description.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        description.NumRenderTargets = 0;
+        description.DSVFormat = kDepthFormat;
+        description.SampleDesc.Count = 1;
+        DAEDALUS_THROW_IF_FAILED(device_->CreateGraphicsPipelineState(&description, IID_PPV_ARGS(&shadow_pipelines_[index])));
+    }
+
     const std::vector<std::byte> tone_vertex_bytes = read_binary_file(tone_vertex_shader);
     const std::vector<std::byte> tone_pixel_bytes = read_binary_file(tone_pixel_shader);
     D3D12_GRAPHICS_PIPELINE_STATE_DESC tone{};
@@ -456,7 +608,7 @@ void PbrSceneRenderer::create_pipeline_states(const std::filesystem::path& raste
 void PbrSceneRenderer::create_descriptor_heaps()
 {
     const std::uint64_t scene_srv_count = checked_multiply_u64(scene_.textures.size(), 2U, "texture SRV descriptor");
-    const std::uint64_t total_srv_count = checked_add_u64(scene_srv_count, 3U, "SRV descriptor"); // white linear/sRGB plus HDR
+    const std::uint64_t total_srv_count = checked_add_u64(scene_srv_count, 4U, "SRV descriptor"); // white linear/sRGB plus HDR and shadow
     if (total_srv_count > D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1)
         throw std::runtime_error("scene requires more shader-visible SRV descriptors than the C1 forward renderer supports");
     D3D12_DESCRIPTOR_HEAP_DESC srv_description{};
@@ -466,10 +618,11 @@ void PbrSceneRenderer::create_descriptor_heaps()
     DAEDALUS_THROW_IF_FAILED(device_->CreateDescriptorHeap(&srv_description, IID_PPV_ARGS(&srv_heap_)));
     srv_increment_ = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     hdr_srv_index_ = checked_uint(static_cast<std::size_t>(checked_add_u64(scene_srv_count, 2U, "HDR SRV index")), "HDR SRV index");
+    shadow_srv_index_ = checked_uint(static_cast<std::size_t>(checked_add_u64(scene_srv_count, 3U, "shadow SRV index")), "shadow SRV index");
 
     if (scene_.samplers.size() == std::numeric_limits<std::size_t>::max())
         throw std::overflow_error("sampler descriptor count overflow");
-    const std::size_t sampler_count = scene_.samplers.size() + 1U;
+    const std::size_t sampler_count = scene_.samplers.size() + 2U;
     if (sampler_count > D3D12_MAX_SHADER_VISIBLE_SAMPLER_HEAP_SIZE)
         throw std::runtime_error("scene requires more shader-visible samplers than D3D12 permits");
     D3D12_DESCRIPTOR_HEAP_DESC sampler_description{};
@@ -478,6 +631,7 @@ void PbrSceneRenderer::create_descriptor_heaps()
     sampler_description.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     DAEDALUS_THROW_IF_FAILED(device_->CreateDescriptorHeap(&sampler_description, IID_PPV_ARGS(&sampler_heap_)));
     sampler_increment_ = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+    shadow_sampler_index_ = checked_uint(scene_.samplers.size() + 1U, "shadow sampler index");
 
     D3D12_DESCRIPTOR_HEAP_DESC hdr_rtv_description{};
     hdr_rtv_description.NumDescriptors = 1;
@@ -488,6 +642,11 @@ void PbrSceneRenderer::create_descriptor_heaps()
     dsv_description.NumDescriptors = 1;
     dsv_description.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
     DAEDALUS_THROW_IF_FAILED(device_->CreateDescriptorHeap(&dsv_description, IID_PPV_ARGS(&dsv_heap_)));
+
+    D3D12_DESCRIPTOR_HEAP_DESC shadow_dsv_description{};
+    shadow_dsv_description.NumDescriptors = 1;
+    shadow_dsv_description.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+    DAEDALUS_THROW_IF_FAILED(device_->CreateDescriptorHeap(&shadow_dsv_description, IID_PPV_ARGS(&shadow_dsv_heap_)));
 }
 
 void PbrSceneRenderer::create_textures_and_samplers()
@@ -559,6 +718,22 @@ void PbrSceneRenderer::create_textures_and_samplers()
     write_sampler(0U, Sampler{});
     for (std::size_t index = 0; index < scene_.samplers.size(); ++index)
         write_sampler(static_cast<std::uint32_t>(index + 1U), scene_.samplers[index]);
+
+    D3D12_SAMPLER_DESC shadow_sampler{};
+    shadow_sampler.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+    shadow_sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    shadow_sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    shadow_sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    shadow_sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    shadow_sampler.BorderColor[0] = 1.0F;
+    shadow_sampler.BorderColor[1] = 1.0F;
+    shadow_sampler.BorderColor[2] = 1.0F;
+    shadow_sampler.BorderColor[3] = 1.0F;
+    shadow_sampler.MinLOD = 0.0F;
+    shadow_sampler.MaxLOD = 0.0F;
+    D3D12_CPU_DESCRIPTOR_HANDLE shadow_sampler_handle = sampler_heap_->GetCPUDescriptorHandleForHeapStart();
+    shadow_sampler_handle.ptr += static_cast<SIZE_T>(shadow_sampler_index_) * sampler_increment_;
+    device_->CreateSampler(&shadow_sampler, shadow_sampler_handle);
 }
 
 void PbrSceneRenderer::create_geometry()
@@ -593,6 +768,8 @@ void PbrSceneRenderer::create_draw_items()
 {
     draw_items_ = prepare_raster_draws(scene_);
     lights_ = prepare_punctual_lights(scene_);
+    if (shadows_enabled_ && scene_.selected_scene.valid() && scene_.selected_scene.value() < scene_.scenes.size())
+        shadow_projection_ = build_shadow_projection(scene_.scenes[scene_.selected_scene.value()].bounds, lights_);
     for (const PreparedRasterDraw& draw : draw_items_)
     {
         if (draw.primitive_index >= primitives_.size())
@@ -603,6 +780,100 @@ void PbrSceneRenderer::create_draw_items()
                          " because the canonical primitive has no tangent basis");
         }
     }
+}
+
+
+void PbrSceneRenderer::create_shadow_resources()
+{
+    shadow_map_.Reset();
+    D3D12_RESOURCE_DESC description{};
+    description.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    description.Width = kShadowMapSize;
+    description.Height = kShadowMapSize;
+    description.DepthOrArraySize = 1;
+    description.MipLevels = 1;
+    description.Format = DXGI_FORMAT_R32_TYPELESS;
+    description.SampleDesc.Count = 1;
+    description.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    description.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+    D3D12_CLEAR_VALUE clear{};
+    clear.Format = kDepthFormat;
+    clear.DepthStencil.Depth = 1.0F;
+    const D3D12_HEAP_PROPERTIES heap = heap_properties(D3D12_HEAP_TYPE_DEFAULT);
+    DAEDALUS_THROW_IF_FAILED(device_->CreateCommittedResource(
+        &heap, D3D12_HEAP_FLAG_NONE, &description, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+        &clear, IID_PPV_ARGS(&shadow_map_)));
+
+    D3D12_DEPTH_STENCIL_VIEW_DESC dsv{};
+    dsv.Format = kDepthFormat;
+    dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    device_->CreateDepthStencilView(shadow_map_.Get(), &dsv, shadow_dsv_heap_->GetCPUDescriptorHandleForHeapStart());
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+    srv.Format = DXGI_FORMAT_R32_FLOAT;
+    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srv.Texture2D.MipLevels = 1;
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = srv_heap_->GetCPUDescriptorHandleForHeapStart();
+    handle.ptr += static_cast<SIZE_T>(shadow_srv_index_) * srv_increment_;
+    device_->CreateShaderResourceView(shadow_map_.Get(), &srv, handle);
+}
+
+void PbrSceneRenderer::record_shadow_pass(ID3D12GraphicsCommandList* command_list,
+                                          std::uint32_t frame_index,
+                                          std::size_t frame_slot_base)
+{
+    if (!shadows_enabled_ || !shadow_projection_.enabled) return;
+
+    ShadowFrameConstants shadow_constants{};
+    shadow_constants.light_view_projection = shadow_projection_.view_projection;
+    write_shadow_frame_constants(frame_index, shadow_constants);
+
+    const D3D12_RESOURCE_BARRIER begin = transition(
+        shadow_map_.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    command_list->ResourceBarrier(1, &begin);
+    const D3D12_CPU_DESCRIPTOR_HANDLE shadow_dsv = shadow_dsv_heap_->GetCPUDescriptorHandleForHeapStart();
+    command_list->ClearDepthStencilView(shadow_dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0F, 0, 0, nullptr);
+    command_list->OMSetRenderTargets(0, nullptr, FALSE, &shadow_dsv);
+
+    D3D12_VIEWPORT viewport{};
+    viewport.Width = static_cast<float>(kShadowMapSize);
+    viewport.Height = static_cast<float>(kShadowMapSize);
+    viewport.MinDepth = 0.0F;
+    viewport.MaxDepth = 1.0F;
+    const D3D12_RECT scissor{0, 0, static_cast<LONG>(kShadowMapSize), static_cast<LONG>(kShadowMapSize)};
+    command_list->RSSetViewports(1, &viewport);
+    command_list->RSSetScissorRects(1, &scissor);
+    command_list->SetGraphicsRootSignature(shadow_root_signature_.Get());
+    ID3D12DescriptorHeap* heaps[] = {srv_heap_.Get(), sampler_heap_.Get()};
+    command_list->SetDescriptorHeaps(2, heaps);
+    command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    command_list->SetGraphicsRootConstantBufferView(
+        0U, shadow_frame_constant_buffer_->GetGPUVirtualAddress() + static_cast<UINT64>(frame_index) * shadow_frame_constant_stride_);
+
+    std::size_t slot_offset = 0U;
+    for (const PreparedRasterDraw& draw : draw_items_)
+    {
+        if (draw.alpha_mode == AlphaMode::blend) continue;
+        const GpuPrimitive& primitive = primitives_.at(draw.primitive_index);
+        const std::size_t slot = frame_slot_base + slot_offset++;
+        const RasterDrawConstants constants = make_draw_constants(draw);
+        write_draw_constants(slot, constants);
+        std::size_t pipeline_index = draw.double_sided ? 2U : 0U;
+        if (draw.negative_determinant) pipeline_index += 1U;
+        command_list->SetPipelineState(shadow_pipelines_[pipeline_index].Get());
+        command_list->SetGraphicsRootConstantBufferView(
+            1U, draw_constant_buffer_->GetGPUVirtualAddress() + slot * draw_constant_stride_);
+        command_list->SetGraphicsRootDescriptorTable(2U, srv_gpu_handle(srv_index_for(draw.base_color, true)));
+        command_list->SetGraphicsRootDescriptorTable(3U, sampler_gpu_handle(sampler_index_for(draw.base_color)));
+        command_list->IASetVertexBuffers(0, 1, &primitive.vertex_view);
+        command_list->IASetIndexBuffer(&primitive.index_view);
+        command_list->DrawIndexedInstanced(primitive.index_count, 1, 0, 0, 0);
+    }
+
+    const D3D12_RESOURCE_BARRIER end = transition(
+        shadow_map_.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    command_list->ResourceBarrier(1, &end);
 }
 
 void PbrSceneRenderer::create_bounds_geometry()
@@ -636,9 +907,10 @@ void PbrSceneRenderer::create_constant_buffers()
     frame_constant_stride_ = align_constant_buffer_size(sizeof(RasterFrameConstants));
     light_constant_stride_ = align_constant_buffer_size(sizeof(RasterLightConstants));
     draw_constant_stride_ = align_constant_buffer_size(sizeof(RasterDrawConstants));
+    shadow_frame_constant_stride_ = align_constant_buffer_size(sizeof(ShadowFrameConstants));
     if (draw_items_.size() == std::numeric_limits<std::size_t>::max())
         throw std::overflow_error("draw constant slot count overflow");
-    draw_slots_per_frame_ = std::max<std::size_t>(1U, draw_items_.size() + 1U);
+    draw_slots_per_frame_ = std::max<std::size_t>(2U, (draw_items_.size() + 1U) * 2U);
 
     auto create_mapped_upload = [&](std::uint64_t byte_size,
                                     Microsoft::WRL::ComPtr<ID3D12Resource>& resource,
@@ -656,6 +928,8 @@ void PbrSceneRenderer::create_constant_buffers()
                          frame_constant_buffer_, mapped_frame_constants_);
     create_mapped_upload(checked_multiply_u64(light_constant_stride_, D3D12Context::kFrameCount, "light constants"),
                          light_constant_buffer_, mapped_light_constants_);
+    create_mapped_upload(checked_multiply_u64(shadow_frame_constant_stride_, D3D12Context::kFrameCount, "shadow frame constants"),
+                         shadow_frame_constant_buffer_, mapped_shadow_frame_constants_);
     const std::uint64_t draw_frame_bytes = checked_multiply_u64(draw_constant_stride_, draw_slots_per_frame_, "draw frame constants");
     create_mapped_upload(checked_multiply_u64(draw_frame_bytes, D3D12Context::kFrameCount, "draw constants"),
                          draw_constant_buffer_, mapped_draw_constants_);
@@ -740,6 +1014,12 @@ void PbrSceneRenderer::write_draw_constants(std::size_t slot, const RasterDrawCo
     std::memcpy(mapped_draw_constants_ + slot * draw_constant_stride_, &constants, sizeof(constants));
 }
 
+void PbrSceneRenderer::write_shadow_frame_constants(std::uint32_t frame_index, const ShadowFrameConstants& constants)
+{
+    std::memcpy(mapped_shadow_frame_constants_ + static_cast<std::size_t>(frame_index) * shadow_frame_constant_stride_,
+                &constants, sizeof(constants));
+}
+
 RasterDrawConstants PbrSceneRenderer::make_draw_constants(const PreparedRasterDraw& draw) const
 {
     RasterDrawConstants constants{};
@@ -772,9 +1052,15 @@ RasterDrawConstants PbrSceneRenderer::make_draw_constants(const PreparedRasterDr
 
 ID3D12PipelineState* PbrSceneRenderer::pipeline_for(const PreparedRasterDraw& draw) const noexcept
 {
-    const bool blend = draw.alpha_mode == AlphaMode::blend;
     const bool double_sided = draw.double_sided;
     const bool negative = draw.negative_determinant;
+    if (mode_ == DiagnosticMode::overdraw)
+    {
+        std::size_t index = double_sided ? 2U : 0U;
+        if (negative) index += 1U;
+        return overdraw_pipelines_[index].Get();
+    }
+    const bool blend = draw.alpha_mode == AlphaMode::blend;
     std::size_t index = blend ? 4U : 0U;
     if (double_sided) index += 2U;
     if (negative) index += 1U;
@@ -818,15 +1104,23 @@ void PbrSceneRenderer::record(const FrameRecordingContext& frame)
     if (frame.frame_index >= D3D12Context::kFrameCount)
         throw std::runtime_error("frame index exceeds constant-buffer frame partition count");
     ID3D12GraphicsCommandList* command_list = frame.command_list;
+    consume_timing(frame.frame_index);
+    const UINT query_base = frame.frame_index * kTimestampCountPerFrame;
+    if (timestamp_query_heap_ != nullptr) command_list->EndQuery(timestamp_query_heap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, query_base + 0U);
 
     RasterFrameConstants frame_constants{};
     const float aspect = frame.height == 0U ? 1.0F : static_cast<float>(frame.width) / static_cast<float>(frame.height);
     frame_constants.view_projection = camera_.view_projection_matrix(aspect);
+    frame_constants.shadow_view_projection = shadow_projection_.enabled ? shadow_projection_.view_projection : identity_matrix();
     const Vec3 camera_position = camera_.eye();
     frame_constants.camera_position = {camera_position.x, camera_position.y, camera_position.z, 0.0F};
-    frame_constants.provisional_ambient = {0.03F, 0.03F, 0.03F, 0.0F};
+    frame_constants.environment_shadow = {environment_intensity_, shadow_projection_.constant_bias,
+                                          shadow_projection_.normal_bias, 1.0F / static_cast<float>(kShadowMapSize)};
     frame_constants.diagnostic_mode = shader_diagnostic_value(mode_);
     frame_constants.light_count = checked_uint(lights_.size(), "punctual light count");
+    frame_constants.shadow_light_index = shadow_projection_.enabled
+        ? checked_uint(shadow_projection_.light_index, "shadow light index") : 0xFFFFFFFFU;
+    frame_constants.frame_flags = shadows_enabled_ && shadow_projection_.enabled ? kFrameFlagShadowsEnabled : 0U;
     write_frame_constants(frame.frame_index, frame_constants);
 
     RasterLightConstants light_constants{};
@@ -841,6 +1135,11 @@ void PbrSceneRenderer::record(const FrameRecordingContext& frame)
         destination.inner_cone_cos = source.inner_cone_cos;
     }
     write_light_constants(frame.frame_index, light_constants);
+
+    const std::size_t frame_slot_base = static_cast<std::size_t>(frame.frame_index) * draw_slots_per_frame_;
+    const std::size_t shadow_slot_base = frame_slot_base + draw_items_.size() + 1U;
+    record_shadow_pass(command_list, frame.frame_index, shadow_slot_base);
+    if (timestamp_query_heap_ != nullptr) command_list->EndQuery(timestamp_query_heap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, query_base + 1U);
 
     const D3D12_RESOURCE_BARRIER hdr_begin = transition(
         hdr_target_.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
@@ -873,8 +1172,7 @@ void PbrSceneRenderer::record(const FrameRecordingContext& frame)
     command_list->SetGraphicsRootConstantBufferView(kRootLightConstants, light_address);
 
     const std::vector<std::size_t> draw_order = build_raster_draw_order(draw_items_, camera_position);
-    const std::size_t frame_slot_base = static_cast<std::size_t>(frame.frame_index) * draw_slots_per_frame_;
-    for (std::size_t order_index = 0; order_index < draw_order.size(); ++order_index)
+    auto record_draw = [&](std::size_t order_index)
     {
         const std::size_t draw_index = draw_order[order_index];
         const PreparedRasterDraw& draw = draw_items_[draw_index];
@@ -903,10 +1201,26 @@ void PbrSceneRenderer::record(const FrameRecordingContext& frame)
             command_list->SetGraphicsRootDescriptorTable(kRootSrvBase + binding, srv_gpu_handle(srvs[binding]));
             command_list->SetGraphicsRootDescriptorTable(kRootSamplerBase + binding, sampler_gpu_handle(samplers[binding]));
         }
+        command_list->SetGraphicsRootDescriptorTable(kRootShadowSrv, srv_gpu_handle(shadow_srv_index_));
+        command_list->SetGraphicsRootDescriptorTable(kRootShadowSampler, sampler_gpu_handle(shadow_sampler_index_));
         command_list->IASetVertexBuffers(0, 1, &primitive.vertex_view);
         command_list->IASetIndexBuffer(&primitive.index_view);
         command_list->DrawIndexedInstanced(primitive.index_count, 1, 0, 0, 0);
+    };
+
+    std::size_t first_transparent = draw_order.size();
+    for (std::size_t index = 0; index < draw_order.size(); ++index)
+    {
+        if (draw_items_[draw_order[index]].alpha_mode == AlphaMode::blend)
+        {
+            first_transparent = index;
+            break;
+        }
+        record_draw(index);
     }
+    if (timestamp_query_heap_ != nullptr) command_list->EndQuery(timestamp_query_heap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, query_base + 2U);
+    for (std::size_t index = first_transparent; index < draw_order.size(); ++index) record_draw(index);
+    if (timestamp_query_heap_ != nullptr) command_list->EndQuery(timestamp_query_heap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, query_base + 3U);
 
     if (mode_ == DiagnosticMode::bounds && bounds_vertex_count_ != 0U)
     {
@@ -927,17 +1241,40 @@ void PbrSceneRenderer::record(const FrameRecordingContext& frame)
                                                          srv_gpu_handle(binding == 0U || binding == 4U ? kWhiteSrgbSrv : kWhiteLinearSrv));
             command_list->SetGraphicsRootDescriptorTable(kRootSamplerBase + binding, sampler_gpu_handle(0U));
         }
+        command_list->SetGraphicsRootDescriptorTable(kRootShadowSrv, srv_gpu_handle(shadow_srv_index_));
+        command_list->SetGraphicsRootDescriptorTable(kRootShadowSampler, sampler_gpu_handle(shadow_sampler_index_));
         command_list->IASetVertexBuffers(0, 1, &bounds_vertex_view_);
         command_list->IASetIndexBuffer(nullptr);
         command_list->DrawInstanced(bounds_vertex_count_, 1, 0, 0);
     }
 
-    const D3D12_RESOURCE_BARRIER hdr_end = transition(
-        hdr_target_.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    if (validate_hdr_requested_)
+    {
+        const D3D12_RESOURCE_BARRIER hdr_to_copy = transition(
+            hdr_target_.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        command_list->ResourceBarrier(1, &hdr_to_copy);
+        D3D12_TEXTURE_COPY_LOCATION source{};
+        source.pResource = hdr_target_.Get();
+        source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        source.SubresourceIndex = 0;
+        D3D12_TEXTURE_COPY_LOCATION destination{};
+        destination.pResource = hdr_capture_readback_.Get();
+        destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        destination.PlacedFootprint = hdr_capture_footprint_;
+        command_list->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+        const D3D12_RESOURCE_BARRIER hdr_to_srv = transition(
+            hdr_target_.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        command_list->ResourceBarrier(1, &hdr_to_srv);
+    }
+    else
+    {
+        const D3D12_RESOURCE_BARRIER hdr_end = transition(
+            hdr_target_.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        command_list->ResourceBarrier(1, &hdr_end);
+    }
     const D3D12_RESOURCE_BARRIER back_buffer_begin = transition(
         frame.back_buffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-    const std::array<D3D12_RESOURCE_BARRIER, 2> pre_tone{hdr_end, back_buffer_begin};
-    command_list->ResourceBarrier(static_cast<UINT>(pre_tone.size()), pre_tone.data());
+    command_list->ResourceBarrier(1, &back_buffer_begin);
 
     command_list->OMSetRenderTargets(1, &frame.render_target, FALSE, nullptr);
     command_list->SetGraphicsRootSignature(tone_root_signature_.Get());
@@ -957,10 +1294,261 @@ void PbrSceneRenderer::record(const FrameRecordingContext& frame)
     } tone_constants{exposure_ev_, shader_diagnostic_value(mode_), 0U, 0U};
     command_list->SetGraphicsRoot32BitConstants(kToneRootConstants, 4U, &tone_constants, 0U);
     command_list->DrawInstanced(3, 1, 0, 0);
+    if (timestamp_query_heap_ != nullptr)
+    {
+        command_list->EndQuery(timestamp_query_heap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, query_base + 4U);
+        command_list->ResolveQueryData(timestamp_query_heap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, query_base,
+                                       kTimestampCountPerFrame, timestamp_readback_.Get(),
+                                       static_cast<UINT64>(query_base) * sizeof(std::uint64_t));
+        timestamp_frame_valid_[frame.frame_index] = true;
+    }
 
-    const D3D12_RESOURCE_BARRIER back_buffer_end = transition(
-        frame.back_buffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-    command_list->ResourceBarrier(1, &back_buffer_end);
+    if (capture_ldr_requested_)
+    {
+        const D3D12_RESOURCE_BARRIER to_copy = transition(
+            frame.back_buffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        command_list->ResourceBarrier(1, &to_copy);
+        D3D12_TEXTURE_COPY_LOCATION source{};
+        source.pResource = frame.back_buffer;
+        source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        source.SubresourceIndex = 0;
+        D3D12_TEXTURE_COPY_LOCATION destination{};
+        destination.pResource = ldr_capture_readback_.Get();
+        destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        destination.PlacedFootprint = ldr_capture_footprint_;
+        command_list->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+        const D3D12_RESOURCE_BARRIER to_present = transition(
+            frame.back_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PRESENT);
+        command_list->ResourceBarrier(1, &to_present);
+    }
+    else
+    {
+        const D3D12_RESOURCE_BARRIER back_buffer_end = transition(
+            frame.back_buffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+        command_list->ResourceBarrier(1, &back_buffer_end);
+    }
+    if (capture_ldr_requested_ || validate_hdr_requested_) capture_recorded_ = true;
+}
+
+
+
+void PbrSceneRenderer::create_timing_resources()
+{
+    timestamp_frequency_ = context_.timestamp_frequency();
+    if (timestamp_frequency_ == 0U)
+    {
+        Log::warning("D3D12 timestamp frequency is unavailable; GPU timing will report invalid");
+        return;
+    }
+    D3D12_QUERY_HEAP_DESC heap_desc{};
+    heap_desc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+    heap_desc.Count = kTimestampCountPerFrame * D3D12Context::kFrameCount;
+    DAEDALUS_THROW_IF_FAILED(device_->CreateQueryHeap(&heap_desc, IID_PPV_ARGS(&timestamp_query_heap_)));
+
+    const std::uint64_t bytes = static_cast<std::uint64_t>(heap_desc.Count) * sizeof(std::uint64_t);
+    const D3D12_HEAP_PROPERTIES readback_heap = heap_properties(D3D12_HEAP_TYPE_READBACK);
+    const D3D12_RESOURCE_DESC buffer = buffer_description(bytes);
+    DAEDALUS_THROW_IF_FAILED(device_->CreateCommittedResource(
+        &readback_heap, D3D12_HEAP_FLAG_NONE, &buffer, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+        IID_PPV_ARGS(&timestamp_readback_)));
+    void* mapped = nullptr;
+    D3D12_RANGE range{0, static_cast<SIZE_T>(bytes)};
+    DAEDALUS_THROW_IF_FAILED(timestamp_readback_->Map(0, &range, &mapped));
+    mapped_timestamps_ = static_cast<std::uint64_t*>(mapped);
+}
+
+void PbrSceneRenderer::consume_timing(std::uint32_t frame_index) noexcept
+{
+    latest_gpu_timings_ = {};
+    if (mapped_timestamps_ == nullptr || timestamp_frequency_ == 0U || frame_index >= timestamp_frame_valid_.size() ||
+        !timestamp_frame_valid_[frame_index]) return;
+    const std::size_t base = static_cast<std::size_t>(frame_index) * kTimestampCountPerFrame;
+    const std::uint64_t t0 = mapped_timestamps_[base + 0U];
+    const std::uint64_t t1 = mapped_timestamps_[base + 1U];
+    const std::uint64_t t2 = mapped_timestamps_[base + 2U];
+    const std::uint64_t t3 = mapped_timestamps_[base + 3U];
+    const std::uint64_t t4 = mapped_timestamps_[base + 4U];
+    if (!(t0 <= t1 && t1 <= t2 && t2 <= t3 && t3 <= t4)) return;
+    const double to_ms = 1000.0 / static_cast<double>(timestamp_frequency_);
+    latest_gpu_timings_.valid = true;
+    latest_gpu_timings_.shadow_ms = static_cast<double>(t1 - t0) * to_ms;
+    latest_gpu_timings_.opaque_ms = static_cast<double>(t2 - t1) * to_ms;
+    latest_gpu_timings_.transparent_ms = static_cast<double>(t3 - t2) * to_ms;
+    latest_gpu_timings_.tone_map_ms = static_cast<double>(t4 - t3) * to_ms;
+    latest_gpu_timings_.total_ms = static_cast<double>(t4 - t0) * to_ms;
+}
+
+GpuPassTimings PbrSceneRenderer::gpu_timings() const noexcept
+{
+    return latest_gpu_timings_;
+}
+
+RendererCameraState PbrSceneRenderer::camera_state() const noexcept
+{
+    return RendererCameraState{camera_.eye(), camera_.target(), 50.0F};
+}
+
+RendererResourceStats PbrSceneRenderer::resource_stats() const noexcept
+{
+    RendererResourceStats stats{};
+    stats.vertex_buffer_count = primitives_.size();
+    stats.index_buffer_count = primitives_.size();
+    stats.texture_count = textures_.size();
+    stats.material_count = scene_.materials.size() + 1U;
+    stats.light_count = lights_.size();
+    stats.material_buffer_count = draw_constant_buffer_ != nullptr ? 1U : 0U;
+    stats.light_buffer_count = light_constant_buffer_ != nullptr ? 1U : 0U;
+    stats.hdr_target_count = hdr_target_ != nullptr ? 1U : 0U;
+    stats.depth_target_count = depth_buffer_ != nullptr ? 1U : 0U;
+    stats.shadow_map_count = shadow_map_ != nullptr ? 1U : 0U;
+    stats.diagnostic_resource_count = bounds_vertex_buffer_ != nullptr ? 1U : 0U;
+    const std::uint64_t srv_descriptors = static_cast<std::uint64_t>(shadow_srv_index_) + 1U;
+    const std::uint64_t sampler_descriptors = static_cast<std::uint64_t>(scene_.samplers.size()) + 2U;
+    stats.descriptor_count = srv_descriptors + sampler_descriptors + 3U; // HDR RTV + main/shadow DSV
+    stats.logical_geometry_bytes = scene_.source.resource_usage.canonical_geometry_bytes;
+    stats.canonical_retained_bytes = scene_.source.resource_usage.retained_bytes;
+
+    auto add_allocation = [&](ID3D12Resource* resource) noexcept
+    {
+        if (resource == nullptr || device_ == nullptr) return;
+        const D3D12_RESOURCE_DESC desc = resource->GetDesc();
+        const D3D12_RESOURCE_ALLOCATION_INFO info = device_->GetResourceAllocationInfo(0, 1, &desc);
+        if (info.SizeInBytes != std::numeric_limits<std::uint64_t>::max() &&
+            stats.committed_allocation_bytes <= std::numeric_limits<std::uint64_t>::max() - info.SizeInBytes)
+            stats.committed_allocation_bytes += info.SizeInBytes;
+    };
+    for (const GpuPrimitive& primitive : primitives_)
+    {
+        add_allocation(primitive.vertex_buffer.Get());
+        add_allocation(primitive.index_buffer.Get());
+    }
+    for (const auto& texture : textures_) add_allocation(texture.Get());
+    add_allocation(hdr_target_.Get());
+    add_allocation(depth_buffer_.Get());
+    add_allocation(shadow_map_.Get());
+    add_allocation(frame_constant_buffer_.Get());
+    add_allocation(light_constant_buffer_.Get());
+    add_allocation(draw_constant_buffer_.Get());
+    add_allocation(shadow_frame_constant_buffer_.Get());
+    add_allocation(bounds_vertex_buffer_.Get());
+    return stats;
+}
+
+void PbrSceneRenderer::prepare_capture_resources(bool capture_ldr, bool validate_hdr)
+{
+    ldr_capture_readback_.Reset();
+    hdr_capture_readback_.Reset();
+    ldr_capture_size_ = 0;
+    hdr_capture_size_ = 0;
+    ldr_capture_footprint_ = {};
+    hdr_capture_footprint_ = {};
+
+    const D3D12_HEAP_PROPERTIES readback_heap = heap_properties(D3D12_HEAP_TYPE_READBACK);
+    if (capture_ldr)
+    {
+        D3D12_RESOURCE_DESC desc{};
+        desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        desc.Width = viewport_width_;
+        desc.Height = viewport_height_;
+        desc.DepthOrArraySize = 1;
+        desc.MipLevels = 1;
+        desc.Format = D3D12Context::kRenderTargetFormat;
+        desc.SampleDesc.Count = 1;
+        desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        UINT rows = 0;
+        UINT64 size = 0;
+        device_->GetCopyableFootprints(&desc, 0, 1, 0, &ldr_capture_footprint_, &rows, nullptr, &size);
+        if (rows != viewport_height_ || size == 0U) throw std::runtime_error("invalid LDR capture footprint");
+        const D3D12_RESOURCE_DESC buffer = buffer_description(size);
+        DAEDALUS_THROW_IF_FAILED(device_->CreateCommittedResource(
+            &readback_heap, D3D12_HEAP_FLAG_NONE, &buffer, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+            IID_PPV_ARGS(&ldr_capture_readback_)));
+        ldr_capture_size_ = size;
+    }
+    if (validate_hdr)
+    {
+        const D3D12_RESOURCE_DESC desc = hdr_target_->GetDesc();
+        UINT rows = 0;
+        UINT64 size = 0;
+        device_->GetCopyableFootprints(&desc, 0, 1, 0, &hdr_capture_footprint_, &rows, nullptr, &size);
+        if (rows != viewport_height_ || size == 0U) throw std::runtime_error("invalid HDR capture footprint");
+        const D3D12_RESOURCE_DESC buffer = buffer_description(size);
+        DAEDALUS_THROW_IF_FAILED(device_->CreateCommittedResource(
+            &readback_heap, D3D12_HEAP_FLAG_NONE, &buffer, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+            IID_PPV_ARGS(&hdr_capture_readback_)));
+        hdr_capture_size_ = size;
+    }
+}
+
+void PbrSceneRenderer::request_validation_capture(bool capture_ldr, bool validate_hdr)
+{
+    if (!capture_ldr && !validate_hdr) throw std::invalid_argument("validation capture requires LDR capture and/or HDR validation");
+    if (capture_ldr_requested_ || validate_hdr_requested_ || capture_recorded_)
+        throw std::runtime_error("a validation capture is already pending");
+    prepare_capture_resources(capture_ldr, validate_hdr);
+    capture_ldr_requested_ = capture_ldr;
+    validate_hdr_requested_ = validate_hdr;
+}
+
+RendererCaptureResult PbrSceneRenderer::finalize_validation_capture()
+{
+    if (!capture_recorded_) throw std::runtime_error("no completed validation capture is available");
+    RendererCaptureResult result;
+    result.width = viewport_width_;
+    result.height = viewport_height_;
+
+    if (ldr_capture_readback_ != nullptr)
+    {
+        const std::size_t tight_row = static_cast<std::size_t>(viewport_width_) * 4U;
+        result.rgba8.resize(tight_row * viewport_height_);
+        void* mapped_void = nullptr;
+        D3D12_RANGE read_range{0, static_cast<SIZE_T>(ldr_capture_size_)};
+        DAEDALUS_THROW_IF_FAILED(ldr_capture_readback_->Map(0, &read_range, &mapped_void));
+        const auto* mapped = static_cast<const std::byte*>(mapped_void);
+        for (std::uint32_t row = 0; row < viewport_height_; ++row)
+        {
+            std::memcpy(result.rgba8.data() + static_cast<std::size_t>(row) * tight_row,
+                        mapped + static_cast<std::size_t>(ldr_capture_footprint_.Offset) +
+                            static_cast<std::size_t>(row) * ldr_capture_footprint_.Footprint.RowPitch,
+                        tight_row);
+        }
+        D3D12_RANGE written{0, 0};
+        ldr_capture_readback_->Unmap(0, &written);
+    }
+
+    if (hdr_capture_readback_ != nullptr)
+    {
+        void* mapped_void = nullptr;
+        D3D12_RANGE read_range{0, static_cast<SIZE_T>(hdr_capture_size_)};
+        DAEDALUS_THROW_IF_FAILED(hdr_capture_readback_->Map(0, &read_range, &mapped_void));
+        const auto* mapped = static_cast<const std::byte*>(mapped_void);
+        for (std::uint32_t row = 0; row < viewport_height_; ++row)
+        {
+            const auto* halfs = reinterpret_cast<const std::uint16_t*>(
+                mapped + static_cast<std::size_t>(hdr_capture_footprint_.Offset) +
+                static_cast<std::size_t>(row) * hdr_capture_footprint_.Footprint.RowPitch);
+            for (std::uint32_t component = 0; component < viewport_width_ * 4U; ++component)
+            {
+                const std::uint16_t bits = halfs[component];
+                const std::uint16_t exponent = static_cast<std::uint16_t>((bits >> 10U) & 0x1FU);
+                const std::uint16_t mantissa = static_cast<std::uint16_t>(bits & 0x03FFU);
+                if (exponent == 0x1FU)
+                {
+                    if (mantissa == 0U) ++result.hdr_infinity_count;
+                    else ++result.hdr_nan_count;
+                }
+            }
+        }
+        D3D12_RANGE written{0, 0};
+        hdr_capture_readback_->Unmap(0, &written);
+    }
+
+    capture_ldr_requested_ = false;
+    validate_hdr_requested_ = false;
+    capture_recorded_ = false;
+    ldr_capture_readback_.Reset();
+    hdr_capture_readback_.Reset();
+    return result;
 }
 
 void PbrSceneRenderer::resize(std::uint32_t width, std::uint32_t height)

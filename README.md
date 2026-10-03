@@ -1,76 +1,71 @@
 # Project Daedalus
 
-Project Daedalus is an AI-assisted C++20 / DirectX 12 rendering laboratory and reference asset viewer. This source snapshot implements **Campaign C1: Raster PBR Core, Material Correctness, and Direct Lighting** on top of the audited Campaign B canonical scene.
+Project Daedalus is an AI-assisted C++20 / DirectX 12 rendering laboratory and reference asset viewer. This source snapshot implements the **Campaign C2 source architecture: Shadows, IBL, Image Regression, Performance Baselines, and Campaign C Closure tooling** on top of the validated C1 forward PBR foundation.
 
-Campaign C1 is deliberately **not** the end of Campaign C. It establishes the production forward raster/material/direct-lighting/HDR foundation. Shadows, image-based lighting, full screenshot/image-regression infrastructure, performance baselines, and final Campaign C acceptance remain Campaign C2 work.
+Campaign C is **not declared complete by this source archive alone**. The new C2 D3D12/shader/capture/timing paths still require the final Windows hardware/WARP, image-regression, NaN/Inf, benchmark, and live-object evidence listed in `docs/campaigns/campaign-c-acceptance.md`.
 
-## Campaign C1 implementation
+## Campaign C2 implementation
 
-The Windows viewer now has one production raster path, `PbrSceneRenderer`; the temporary Campaign B diagnostic renderer has been retired rather than grown into a second competing implementation.
+The renderer remains one conventional forward `PbrSceneRenderer`. C2 adds the remaining raster-validation infrastructure without introducing DXR, temporal accumulation, DLSS, an ECS, or a render graph.
 
-Implemented C1 behavior includes:
+Implemented source behavior includes:
 
-- glTF metallic-roughness base colour, vertex colour, metallic/roughness, tangent-space normal, emissive, occlusion, alpha, and double-sided material semantics;
-- slot-correct texture interpretation: base colour/emissive through sRGB SRVs, metallic-roughness/normal/occlusion through linear SRVs;
-- explicit roughness **G** / metallic **B** channel mapping;
-- source tangent `w`, negative world determinant, non-uniform-scale normal transformation, and back-face shading-frame handling;
-- explicit no-tangent policy: normal-map evaluation is disabled and logged when the canonical primitive lacks source tangents;
-- GGX/Trowbridge-Reitz + correlated Smith visibility + Schlick Fresnel metallic-roughness BRDF with dielectric F0 = 0.04 and documented finite roughness regularization;
-- canonical `KHR_lights_punctual` directional, point, and spot lights, transformed from glTF local -Z, with inverse-square distance attenuation, smooth finite range, and spot-cone falloff;
-- a hard, reported C1 limit of 32 punctual lights rather than silent truncation;
-- `R16G16B16A16_FLOAT` linear HDR scene colour followed by explicit EV exposure, compact ACES-fit display mapping, and one linear-to-sRGB transfer into the UNORM swap chain;
-- OPAQUE, MASK, and deterministic object-level back-to-front straight-alpha BLEND rendering;
-- material-aware culling/double-sided behavior, including mirrored instances;
-- production-path diagnostics for normals, UVs, tangents, bounds, base colour, metallic, roughness, emissive, and motion-independent material ID;
-- stable material diagnostic IDs where canonical default material = 0 and source material 0 = 1;
-- portable renderer-neutral material/light/draw preparation and numeric PBR reference tests;
-- 12 new deterministic self-authored C1 material/light fixtures.
+- the C1 glTF metallic-roughness material/direct-lighting/HDR path and diagnostics;
+- one deterministic 2048x2048 shadow map for the first directional or spot light, with bounds/cone-fitted projection, alpha-mask casters, explicit state transitions, 3x3 PCF, and configurable constant/normal bias;
+- point lights remain valid direct lights but do not cast cubemap shadows in Campaign C;
+- deterministic self-authored analytic IBL (`daedalus-procedural-sky-v1`) with diffuse irradiance, roughness-dependent specular environment response, split-sum BRDF approximation, configurable intensity, AO restricted to indirect lighting, and emissive kept separate;
+- depth and additive overdraw diagnostics in the same production material path;
+- deterministic fixed-frame back-buffer capture to PNG plus machine-readable metadata;
+- optional pre-tone-map `R16G16B16A16_FLOAT` readback that counts NaN/Inf components and fails validation when any are present;
+- portable linear-sRGB image comparison with MAE, RMSE, maximum error, fraction-over-threshold, visual difference PNG, and explicit reference-promotion policy;
+- four self-authored/generated Campaign C reference scenes: Textured Cube, 5x5 Material Sphere Grid, PBR Production Asset, and Architectural Interior;
+- D3D12 timestamp-query instrumentation for shadow/opaque/transparent/tone-map/total GPU time, separately labelled `steady_clock` CPU frame timing, renderer resource counts, canonical payload bytes, and committed-resource allocation estimates;
+- fixed-frame JSON benchmark output and PowerShell capture/regression/reference-promotion workflows.
 
-Campaign B contracts remain authoritative: an invalid primitive `MaterialId` is the canonical glTF default material and never source material 0; UV0/UV1 selection is explicit; images are canonical top-left RGBA8; instances share canonical geometry safely; and GPU resources remain outside `daedalus_scene`.
+Campaign B/C1 contracts remain authoritative: canonical scene data is DirectX-independent; invalid material IDs mean the canonical default material rather than source material 0; texture colour space is slot-semantic; tangent sign/negative determinant behavior is preserved; and GPU lifetime remains fence-safe.
 
 ## Architecture
 
-Campaign C1 chooses a **conventional forward renderer**. At the current repository scale a forward+ light-list subsystem or deferred G-buffer would add state/lifetime/ABI complexity without a demonstrated need and would complicate transparent materials. The bounded forward path is also a clean baseline for Campaign D hybrid DXR.
+Campaign C retains the **conventional forward renderer** selected in C1. C2 adds bounded validation passes around it rather than replacing it.
 
 ```text
 core
   ↑
 scene          API-independent canonical scene/math
   ↑
-assets         strict glTF/GLB import, image decode, validation, reports
+assets         strict glTF/GLB import, image decode/encode, validation, reports
   ↑
-rendering      portable PBR math + draw/light preparation + camera + ABI contracts
+rendering      portable PBR/C2 math + draw/light prep + camera + ABI contracts
   ↑
-graphics       D3D12 resources, descriptors, HDR/depth, forward pass, tone/output pass
+graphics       D3D12 shadow + HDR/depth + forward PBR + diagnostics + timing/readback
   ↑
-Application    viewer lifecycle, reload/resize/stress orchestration, command line
+Application    viewer lifecycle, capture/benchmark/reload/resize orchestration
 ```
 
 Key documents:
 
 - `docs/architecture/campaign-c1-raster-architecture.md`
+- `docs/architecture/campaign-c2-raster-validation.md`
 - `docs/architecture/pbr-material-and-lighting-contract.md`
-- `docs/architecture/campaign-c1-shader-contract.md`
-- `docs/campaigns/campaign-c1-acceptance.md`
-- `docs/handoffs/campaign-c2-handoff.md`
+- `docs/campaigns/campaign-c-acceptance.md`
+- `docs/campaigns/campaign-c-adversarial-audit.md`
+- `docs/handoffs/campaign-d-handoff.md`
 
-## Supported raster subset
+## Supported raster subset and known limits
 
-The importer continues to support the Campaign B glTF/GLB subset described in `docs/assets/gltf-supported-subset.md`. C1 consumes its core metallic-roughness material and punctual-light data through the canonical scene.
-
-Important current raster limitations:
-
-- no shadows or IBL yet;
-- AO modulates only a small provisional indirect diffuse term, never punctual direct light or emissive output;
-- exactly one mip level is uploaded for each canonical image; sampler LOD is clamped to level 0, so full glTF mip-filter fidelity is not claimed;
-- normal maps require source tangents; no derivative fallback is implemented;
-- transparent sorting is object/draw level and cannot solve every intersecting-transparency case;
-- material extensions such as transmission/clearcoat/specular are not part of the declared C1 subset;
-- the compact ACES fit is a display operator, not full ACES colour management.
+- maximum 32 punctual lights; excess is a reported failure, never silent truncation;
+- one directional/spot shadow caster at a time; no point-light cubemap shadows or cascades;
+- deterministic analytic environment rather than arbitrary HDR environment import;
+- exactly one mip level is uploaded for canonical glTF textures and sampler LOD remains clamped to zero;
+- normal maps require source tangents; no derivative fallback;
+- transparent sorting is object/draw level;
+- no clearcoat/transmission/specular material extensions;
+- compact ACES fit is a display operator, not full ACES colour management;
+- final C2 Windows/D3D12 evidence is still required before Campaign C exit.
 
 ## Portable prerequisites and validation
 
-Portable builds exercise `core`, `scene`, `assets`, and the GPU-independent C1 rendering mathematics/preparation/contracts. They do not build the Win32/D3D12 application.
+Portable builds exercise `core`, `scene`, `assets`, and the GPU-independent Campaign C rendering mathematics/preparation/contracts and image-comparison tool. They do not build the Win32/D3D12 application.
 
 - CMake 3.25+
 - Ninja
@@ -90,7 +85,7 @@ python3 scripts/source-health.py
 python3 scripts/validate-fixture-manifest.py build/portable-debug/DaedalusAssetValidator
 ```
 
-The controlled manifest currently contains **22 valid/degraded top-level fixtures and 25 invalid fixtures**. See `docs/assets/fixture-manifest.md`.
+The controlled manifest currently contains **26 valid/degraded top-level fixtures and 25 invalid fixtures**. See `docs/assets/fixture-manifest.md`.
 
 ## Windows build
 
@@ -104,40 +99,36 @@ cmake --build --preset windows-vs2026-release --clean-first
 ctest --preset windows-vs2026-release --output-on-failure
 ```
 
-The shader build compiles `RasterPbr.hlsl` and `ToneMap.hlsl` through DXC. Debug shaders intentionally retain the Campaign B validated `-Zi -O3 -Qembed_debug` policy; the historical Windows SDK/WARP `-Od` crash is not silently reintroduced.
+The shader build compiles `RasterPbr.hlsl`, `Shadow.hlsl`, and `ToneMap.hlsl` through DXC. Debug shaders intentionally retain the Campaign B validated `-Zi -O3 -Qembed_debug` policy; the historical Windows SDK/WARP `-Od` crash is not silently reintroduced.
 
-The delivery environment used for this source snapshot cannot execute Windows/MSVC/DXC/D3D12 validation. The exact C1 Windows rows therefore remain `NOT RUN`/`BLOCKED` in `docs/campaigns/campaign-c1-acceptance.md` rather than being inferred from portable tests.
+The delivery environment used for this C2 patch cannot execute Windows/MSVC/DXC/D3D12. New C2 runtime rows therefore remain `NOT RUN`/`BLOCKED`; source inspection is never promoted to GPU evidence. Exact closure commands are in `docs/campaigns/campaign-c-acceptance.md`.
 
 ## Viewer command line
 
 ```text
-Daedalus.exe [--asset <path.gltf|path.glb>]
-             [--scene <index-or-name>]
-             [--dump-scene]
-             [--import-report <report.json>]
-             [--diagnostic shaded|normals|uv|tangents|bounds|base-color|metallic|roughness|emissive|material-id]
-             [--exposure <ev-from--24-to-24>]
-             [--warp]
-             [--frames <positive-count>]
-             [--stress-reloads <positive-count>]
-             [--stress-alternate-asset <path>]
-             [--stress-resize]
-             [--report-live-objects]
-             [--no-error-dialog]
+Daedalus.exe [--asset <path.gltf|path.glb>] [--scene <index-or-name>]
+             [--diagnostic shaded|normals|uv|tangents|bounds|base-color|metallic|roughness|emissive|material-id|depth|overdraw]
+             [--exposure <ev>] [--environment-intensity <0..64>]
+             [--no-shadows] [--shadow-bias <0..0.05>] [--shadow-normal-bias <0..0.05>]
+             [--capture <png>] [--capture-frame <n>] [--capture-metadata <json>] [--validate-hdr]
+             [--benchmark-output <json>] [--benchmark-warmup <n>]
+             [--warp] [--frames <count>] [--stress-reloads <count>]
+             [--stress-alternate-asset <path>] [--stress-resize]
+             [--report-live-objects] [--no-error-dialog]
 ```
 
-Camera controls: left-drag orbit, right-drag pan, wheel dolly, `R` reframe, `F5` fence-safe reload.
+Camera controls: left-drag orbit, right-drag pan, wheel dolly, `R` reframe, `F5` fence-safe reload. `scripts/run.ps1` exposes the same C2 switches.
 
-Representative C1 runs are documented in `docs/campaigns/campaign-c1-acceptance.md` and are also available through `scripts/run.ps1`, whose `-Diagnostic` and `-Exposure` parameters map to the same application options.
+Reference images are never changed by normal validation. After reviewing initial captures on the intended baseline machine, promote them explicitly with `scripts/update-campaign-c-references.ps1 -ConfirmReferenceUpdate`; later runs use `scripts/validate-campaign-c.ps1`.
 
 ## Source packaging
 
 After generated build trees are removed, use the deterministic source-only workflow:
 
 ```bash
-python3 scripts/package-source.py --output ../Project-Daedalus-Campaign-C1-PBR-source.zip
+python3 scripts/package-source.py --output ../Project-Daedalus-Campaign-C2-Raster-source.zip
 ```
 
 The archive workflow sorts entries under one `Project-Daedalus/` root, applies a fixed ZIP timestamp, and rejects build products, `.pdb/.obj/.exe/.dll/.lib/.dxil`, logs, IDE state, caches, nested archives, `.git`, obvious secret files, and restricted SDK material. `scripts/package-source.ps1` is the Windows companion.
 
-Historical Campaign B evidence is preserved as history. Campaign C1 does **not** rewrite Campaign B's exact-snapshot blocked/not-run rows, and it does **not** claim full Campaign C completion.
+Historical Campaign B evidence remains preserved. Campaign C2 does not retroactively rewrite its acceptance rows, and this snapshot does not claim Campaign C exit until the final Windows evidence matrix is satisfied.

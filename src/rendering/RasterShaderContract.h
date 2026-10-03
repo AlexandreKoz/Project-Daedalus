@@ -12,12 +12,13 @@ namespace daedalus
 struct alignas(16) RasterFrameConstants
 {
     Mat4 view_projection{};
+    Mat4 shadow_view_projection{};
     Vec4 camera_position{}; // xyz camera position; w reserved
-    Vec4 provisional_ambient{0.03F, 0.03F, 0.03F, 0.0F};
+    Vec4 environment_shadow{}; // x environment intensity; y constant shadow bias; z normal bias; w inverse shadow-map size
     std::uint32_t diagnostic_mode = 0;
     std::uint32_t light_count = 0;
-    std::uint32_t padding0 = 0;
-    std::uint32_t padding1 = 0;
+    std::uint32_t shadow_light_index = 0xFFFFFFFFU;
+    std::uint32_t frame_flags = 0;
 };
 
 struct alignas(16) RasterDrawConstants
@@ -38,8 +39,6 @@ struct alignas(16) RasterDrawConstants
     float world_handedness = 1.0F;
     std::uint32_t padding0 = 0;
     std::uint32_t padding1 = 0;
-    // Explicit tail word keeps the 16-byte CPU/HLSL ABI size without relying on
-    // compiler-inserted tail padding (MSVC C4324 under /W4 /WX).
     std::uint32_t padding2 = 0;
 };
 
@@ -59,6 +58,11 @@ struct alignas(16) RasterLightConstants
     std::array<RasterLightGpu, kMaximumPunctualLights> lights{};
 };
 
+struct alignas(16) ShadowFrameConstants
+{
+    Mat4 light_view_projection{};
+};
+
 inline constexpr std::uint32_t kRasterFlagVertexColor = 1U << 0U;
 inline constexpr std::uint32_t kRasterFlagBaseColorTexture = 1U << 1U;
 inline constexpr std::uint32_t kRasterFlagMetallicRoughnessTexture = 1U << 2U;
@@ -67,10 +71,12 @@ inline constexpr std::uint32_t kRasterFlagOcclusionTexture = 1U << 4U;
 inline constexpr std::uint32_t kRasterFlagEmissiveTexture = 1U << 5U;
 inline constexpr std::uint32_t kRasterFlagDoubleSided = 1U << 6U;
 inline constexpr std::uint32_t kRasterFlagHasTangents = 1U << 7U;
+inline constexpr std::uint32_t kFrameFlagShadowsEnabled = 1U << 0U;
 
 static_assert(alignof(RasterFrameConstants) == 16);
-static_assert(sizeof(RasterFrameConstants) == 112);
-static_assert(offsetof(RasterFrameConstants, diagnostic_mode) == 96);
+static_assert(sizeof(RasterFrameConstants) == 176);
+static_assert(offsetof(RasterFrameConstants, environment_shadow) == 144);
+static_assert(offsetof(RasterFrameConstants, diagnostic_mode) == 160);
 static_assert(alignof(RasterDrawConstants) == 16);
 static_assert(sizeof(RasterDrawConstants) == 224);
 static_assert(offsetof(RasterDrawConstants, flags) == 176);
@@ -79,4 +85,5 @@ static_assert(alignof(RasterLightGpu) == 16);
 static_assert(sizeof(RasterLightGpu) == 64);
 static_assert(offsetof(RasterLightGpu, type) == 48);
 static_assert(sizeof(RasterLightConstants) == 64U * kMaximumPunctualLights);
+static_assert(sizeof(ShadowFrameConstants) == 64);
 }

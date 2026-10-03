@@ -51,6 +51,8 @@ target_compile_features(daedalus_scene PUBLIC cxx_std_20)
 daedalus_apply_project_warnings(daedalus_scene)
 
 add_library(daedalus_rendering STATIC
+    src/rendering/CampaignC2Math.cpp
+    src/rendering/CampaignC2Math.h
     src/rendering/OrbitCamera.cpp
     src/rendering/OrbitCamera.h
     src/rendering/PbrMath.cpp
@@ -70,6 +72,8 @@ add_library(daedalus_assets STATIC
     src/assets/GltfImporter.h
     src/assets/ImageDecoder.cpp
     src/assets/ImageDecoder.h
+    src/assets/ImageEncoder.cpp
+    src/assets/ImageEncoder.h
     src/assets/ImportReport.cpp
     src/assets/ImportReport.h)
 target_link_libraries(daedalus_assets PUBLIC daedalus_core daedalus_scene)
@@ -92,6 +96,14 @@ if(DAEDALUS_BUILD_TOOLS)
     target_link_libraries(DaedalusAssetValidator PRIVATE daedalus_assets)
     target_include_directories(DaedalusAssetValidator PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     daedalus_apply_project_warnings(DaedalusAssetValidator)
+
+    add_executable(DaedalusImageCompare src/tools/ImageCompare.cpp)
+    target_link_libraries(DaedalusImageCompare PRIVATE daedalus_assets daedalus_rendering)
+    if(WIN32)
+        target_link_libraries(DaedalusImageCompare PRIVATE ole32)
+    endif()
+    target_include_directories(DaedalusImageCompare PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    daedalus_apply_project_warnings(DaedalusImageCompare)
 endif()
 
 if(DAEDALUS_BUILD_APP)
@@ -121,6 +133,12 @@ if(DAEDALUS_BUILD_APP)
         "ToneMapVS.dxil"
         "ToneMapPS.dxil"
         "${CMAKE_CURRENT_SOURCE_DIR}/shaders/common/Color.hlsli")
+    daedalus_compile_shader_pair(
+        DaedalusShadowShaders
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/Shadow.hlsl"
+        "${DAEDALUS_SHADER_OUTPUT_DIRECTORY}"
+        "ShadowVS.dxil"
+        "ShadowPS.dxil")
 
     add_executable(Daedalus
         src/Application.cpp
@@ -146,7 +164,7 @@ if(DAEDALUS_BUILD_APP)
         "DAEDALUS_BUILD_TYPE=\"$<CONFIG>\""
         "$<$<CONFIG:Debug>:DAEDALUS_DEBUG_BUILD>")
     daedalus_apply_project_warnings(Daedalus)
-    add_dependencies(Daedalus DaedalusRasterPbrShaders DaedalusToneMapShaders)
+    add_dependencies(Daedalus DaedalusRasterPbrShaders DaedalusToneMapShaders DaedalusShadowShaders)
 
     add_custom_command(TARGET Daedalus POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:Daedalus>/shaders"
@@ -162,7 +180,13 @@ if(DAEDALUS_BUILD_APP)
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${DaedalusToneMapShaders_PIXEL_SHADER}"
             "$<TARGET_FILE_DIR:Daedalus>/shaders/ToneMapPS.dxil"
-        COMMENT "Copying compiled Campaign C1 raster PBR and tone-map shaders beside Daedalus")
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${DaedalusShadowShaders_VERTEX_SHADER}"
+            "$<TARGET_FILE_DIR:Daedalus>/shaders/ShadowVS.dxil"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${DaedalusShadowShaders_PIXEL_SHADER}"
+            "$<TARGET_FILE_DIR:Daedalus>/shaders/ShadowPS.dxil"
+        COMMENT "Copying compiled Campaign C2 raster, shadow, and tone-map shaders beside Daedalus")
 endif()
 
 include(CTest)

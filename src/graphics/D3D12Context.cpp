@@ -322,6 +322,13 @@ bool D3D12Context::using_warp() const noexcept
     return using_warp_;
 }
 
+std::uint64_t D3D12Context::timestamp_frequency() const noexcept
+{
+    if (command_queue_ == nullptr) return 0;
+    UINT64 frequency = 0;
+    return SUCCEEDED(command_queue_->GetTimestampFrequency(&frequency)) ? frequency : 0;
+}
+
 void D3D12Context::enable_debug_layer()
 {
 #if defined(DAEDALUS_DEBUG_BUILD)

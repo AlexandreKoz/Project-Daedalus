@@ -145,6 +145,51 @@ void test_sha256()
 }
 }
 
+
+void test_campaign_c2_command_line()
+{
+    constexpr std::array arguments{
+        std::wstring_view(L"--asset"), std::wstring_view(L"scene.gltf"),
+        std::wstring_view(L"--diagnostic"), std::wstring_view(L"overdraw"),
+        std::wstring_view(L"--environment-intensity"), std::wstring_view(L"1.75"),
+        std::wstring_view(L"--no-shadows"),
+        std::wstring_view(L"--shadow-bias"), std::wstring_view(L"0.0015"),
+        std::wstring_view(L"--shadow-normal-bias"), std::wstring_view(L"0.003"),
+        std::wstring_view(L"--capture"), std::wstring_view(L"capture.png"),
+        std::wstring_view(L"--capture-frame"), std::wstring_view(L"4"),
+        std::wstring_view(L"--capture-metadata"), std::wstring_view(L"capture.json"),
+        std::wstring_view(L"--validate-hdr"),
+        std::wstring_view(L"--frames"), std::wstring_view(L"120"),
+        std::wstring_view(L"--benchmark-output"), std::wstring_view(L"benchmark.json"),
+        std::wstring_view(L"--benchmark-warmup"), std::wstring_view(L"20")};
+    const daedalus::CommandLineOptions options = daedalus::parse_command_line(arguments);
+    require(options.diagnostic_mode == daedalus::DiagnosticMode::overdraw, "overdraw diagnostic parses");
+    require_near(options.environment_intensity, 1.75F, 1.0e-6F, "environment intensity parses");
+    require(!options.shadows_enabled, "shadow disable parses");
+    require_near(options.shadow_constant_bias, 0.0015F, 1.0e-7F, "shadow constant bias parses");
+    require_near(options.shadow_normal_bias, 0.003F, 1.0e-7F, "shadow normal bias parses");
+    require(options.capture_path == std::filesystem::path(L"capture.png"), "capture path parses");
+    require(options.capture_frame == 4U, "capture frame parses");
+    require(options.validate_hdr, "HDR validation parses");
+    require(options.benchmark_output_path == std::filesystem::path(L"benchmark.json"), "benchmark output parses");
+    require(options.benchmark_warmup_frames == 20U, "benchmark warmup parses");
+
+    constexpr std::array depth_args{std::wstring_view(L"--diagnostic"), std::wstring_view(L"depth")};
+    require(daedalus::parse_command_line(depth_args).diagnostic_mode == daedalus::DiagnosticMode::depth,
+            "depth diagnostic parses");
+    constexpr std::array bad_env{std::wstring_view(L"--environment-intensity"), std::wstring_view(L"65")};
+    require_throws<daedalus::CommandLineError>([&] { static_cast<void>(daedalus::parse_command_line(bad_env)); },
+                                                "environment intensity outside range rejects");
+    constexpr std::array benchmark_without_frames{std::wstring_view(L"--benchmark-output"), std::wstring_view(L"x.json")};
+    require_throws<daedalus::CommandLineError>([&] { static_cast<void>(daedalus::parse_command_line(benchmark_without_frames)); },
+                                                "benchmark output requires fixed frame count");
+    constexpr std::array bad_warmup{std::wstring_view(L"--frames"), std::wstring_view(L"10"),
+                                      std::wstring_view(L"--benchmark-output"), std::wstring_view(L"x.json"),
+                                      std::wstring_view(L"--benchmark-warmup"), std::wstring_view(L"10")};
+    require_throws<daedalus::CommandLineError>([&] { static_cast<void>(daedalus::parse_command_line(bad_warmup)); },
+                                                "benchmark warmup must leave measured frames");
+}
+
 int main()
 {
     return daedalus::tests::run({
@@ -154,6 +199,7 @@ int main()
         {"tangent diagnostic mode", test_tangent_diagnostic_mode},
         {"Campaign C1 diagnostics", test_campaign_c1_diagnostic_modes},
         {"stress command line", test_stress_command_line},
+        {"Campaign C2 command line", test_campaign_c2_command_line},
         {"result formatting", test_result_formatting},
         {"adapter policy", test_adapter_policy},
         {"JSON parser", test_json_parser_and_stable_serialization},

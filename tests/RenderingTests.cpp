@@ -1,4 +1,5 @@
 #include "TestHarness.h"
+#include "rendering/CampaignC2Math.h"
 #include "rendering/PbrMath.h"
 #include "rendering/RasterPreparation.h"
 #include "rendering/RasterShaderContract.h"
@@ -227,8 +228,8 @@ void test_punctual_attenuation()
 
 void test_shader_contract_layout()
 {
-    require(sizeof(RasterFrameConstants) == 112, "frame ABI size");
-    require(offsetof(RasterFrameConstants, diagnostic_mode) == 96, "frame diagnostic offset");
+    require(sizeof(RasterFrameConstants) == 176, "frame ABI size");
+    require(offsetof(RasterFrameConstants, diagnostic_mode) == 160, "frame diagnostic offset");
     require(sizeof(RasterDrawConstants) == 224, "draw ABI size");
     require(offsetof(RasterDrawConstants, flags) == 176, "draw flags offset");
     require(offsetof(RasterDrawConstants, world_handedness) == 208, "draw handedness offset");
@@ -290,6 +291,86 @@ void test_deterministic_draw_partition_and_sort()
 }
 }
 
+
+void test_c2_environment_contracts()
+{
+    require_near(roughness_to_environment_lod(0.0F, 6U), 0.0F, 1.0e-6F, "roughness zero lod");
+    require_near(roughness_to_environment_lod(1.0F, 6U), 5.0F, 1.0e-6F, "roughness one lod");
+    require_near(roughness_to_environment_lod(0.5F, 6U), 2.5F, 1.0e-6F, "roughness half lod");
+    const Vec3 sky = procedural_environment_radiance({0.0F, 1.0F, 0.0F});
+    const Vec3 ground = procedural_environment_radiance({0.0F, -1.0F, 0.0F});
+    require_vec3_finite_nonnegative(sky, "procedural sky finite");
+    require_vec3_finite_nonnegative(ground, "procedural ground finite");
+    require(sky.z > ground.z, "sky must carry more blue radiance than ground");
+    const Vec3 diffuse = procedural_diffuse_irradiance({0.0F, 1.0F, 0.0F});
+    const Vec3 sharp = procedural_prefiltered_specular({0.0F, 1.0F, 0.0F}, 0.0F);
+    const Vec3 rough = procedural_prefiltered_specular({0.0F, 1.0F, 0.0F}, 1.0F);
+    require_vec3_finite_nonnegative(diffuse, "diffuse irradiance finite");
+    require_vec3_finite_nonnegative(sharp, "sharp environment finite");
+    require_vec3_finite_nonnegative(rough, "rough environment finite");
+    const Vec2 brdf = environment_brdf_approximation(0.5F, 0.5F);
+    require(std::isfinite(brdf.x) && std::isfinite(brdf.y), "environment BRDF approximation finite");
+}
+
+void test_c2_shadow_projection()
+{
+    Aabb bounds;
+    expand(bounds, Vec3{-2.0F, -1.0F, -3.0F});
+    expand(bounds, Vec3{2.0F, 3.0F, 1.0F});
+    PreparedPunctualLight point;
+    point.type = LightType::point;
+    PreparedPunctualLight directional;
+    directional.type = LightType::directional;
+    directional.direction = normalize(Vec3{0.2F, -1.0F, -0.3F});
+    const std::array lights{point, directional};
+    const ShadowProjection projection = build_shadow_projection(bounds, lights);
+    require(projection.enabled, "directional shadow projection should be selected");
+    require(projection.light_index == 1U, "first supported shadow light must be deterministic");
+    require(projection.light_type == LightType::directional, "directional shadow type");
+    require(finite(projection.view_projection), "directional shadow matrix finite");
+
+    PreparedPunctualLight spot;
+    spot.type = LightType::spot;
+    spot.position = {0.0F, 2.0F, 4.0F};
+    spot.direction = normalize(Vec3{0.0F, -0.25F, -1.0F});
+    spot.range = 10.0F;
+    spot.outer_cone_cos = std::cos(0.55F);
+    const std::array spot_only{spot};
+    const ShadowProjection spot_projection = build_shadow_projection(bounds, spot_only);
+    require(spot_projection.enabled, "spot shadow projection should be selected");
+    require(finite(spot_projection.view_projection), "spot shadow matrix finite");
+}
+
+void test_c2_image_metrics()
+{
+    const std::array<Vec3, 2> reference{{{0.0F, 0.5F, 1.0F}, {0.25F, 0.25F, 0.25F}}};
+    const auto identical = compare_linear_rgb(reference, reference, {});
+    require(identical.pass, "identical images pass");
+    require_near(identical.mean_absolute_error, 0.0F, 1.0e-8F, "identical MAE");
+
+    auto candidate = reference;
+    candidate[0].x = 0.2F;
+    ImageComparisonThresholds strict;
+    strict.mean_absolute_error = 0.001F;
+    strict.root_mean_square_error = 0.001F;
+    strict.maximum_absolute_error = 0.01F;
+    strict.per_channel_threshold = 0.01F;
+    strict.maximum_fraction_over_threshold = 0.0F;
+    const auto changed = compare_linear_rgb(reference, candidate, strict);
+    require(!changed.pass, "changed image must fail strict thresholds");
+    require(changed.channels_over_threshold == 1U, "one changed channel counted");
+
+    const std::array<std::byte, 8> rgba{
+        std::byte{0x80}, std::byte{0x80}, std::byte{0x80}, std::byte{0xff},
+        std::byte{0xff}, std::byte{0x00}, std::byte{0x00}, std::byte{0x7f}};
+    const auto linear = rgba8_srgb_to_linear_rgb(rgba);
+    require(linear.size() == 2U, "rgba conversion pixel count");
+    require_near(linear[0].x, srgb_to_linear(128.0F / 255.0F), 1.0e-6F, "rgba conversion uses sRGB transfer");
+    const std::string json = image_comparison_metrics_json(identical, {});
+    require(json.find("\"status\": \"PASS\"") != std::string::npos, "metrics JSON status");
+    require(json.find("linear-srgb-rgb") != std::string::npos, "metrics JSON domain");
+}
+
 int main()
 {
     return daedalus::tests::run({
@@ -305,5 +386,8 @@ int main()
         {"shader contract layout", test_shader_contract_layout},
         {"default material ID stability", test_default_material_and_material_id_stability},
         {"normal map missing tangent policy", test_normal_map_missing_tangent_policy},
-        {"draw partition and sorting", test_deterministic_draw_partition_and_sort}});
+        {"draw partition and sorting", test_deterministic_draw_partition_and_sort},
+        {"Campaign C2 environment contracts", test_c2_environment_contracts},
+        {"Campaign C2 shadow projection", test_c2_shadow_projection},
+        {"Campaign C2 image metrics", test_c2_image_metrics}});
 }
