@@ -5,6 +5,7 @@
 #include "scene/Scene.h"
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -29,7 +30,8 @@ struct ImportCounts
 
 struct ImportReport
 {
-    static constexpr std::string_view schema_version = "daedalus.import-report/1";
+    // /2 adds the "provenance" object (Campaign H); all /1 fields are unchanged.
+    static constexpr std::string_view schema_version = "daedalus.import-report/2";
     std::string tool_version;
     std::string canonical_schema_version;
     std::string source_display_name;
@@ -49,6 +51,8 @@ struct ImportReport
     std::vector<std::string> extensions_ignored;
     std::vector<std::string> extensions_rejected;
     std::vector<Diagnostic> diagnostics;
+    // Source/tool provenance: adapter and converter versions, units, axes, cache identity, etc.
+    std::map<std::string, std::string> provenance;
     ImportStatus status = ImportStatus::internal_error;
 
     [[nodiscard]] std::string to_json() const;

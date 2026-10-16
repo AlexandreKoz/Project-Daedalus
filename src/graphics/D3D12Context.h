@@ -27,6 +27,9 @@ namespace daedalus
 struct FrameRecordingContext
 {
     ID3D12GraphicsCommandList* command_list = nullptr;
+    // Same command list exposed through the DXR-capable interface; null when the runtime/driver does
+    // not provide ID3D12GraphicsCommandList4 (ray-tracing modes are then reported UNSUPPORTED).
+    ID3D12GraphicsCommandList4* command_list4 = nullptr;
     ID3D12Resource* back_buffer = nullptr;
     D3D12_CPU_DESCRIPTOR_HANDLE render_target{};
     std::uint32_t frame_index = 0;
@@ -57,6 +60,11 @@ public:
     void shutdown(bool report_device_live_objects = false) noexcept;
 
     [[nodiscard]] ID3D12Device* device() const noexcept;
+    // DXR device interface; null when ID3D12Device5 is unavailable.
+    [[nodiscard]] ID3D12Device5* device5() const noexcept;
+    [[nodiscard]] ID3D12CommandQueue* command_queue() const noexcept;
+    [[nodiscard]] bool supports_command_list4() const noexcept;
+    [[nodiscard]] IDXGIAdapter1* adapter() const noexcept;
     [[nodiscard]] std::uint32_t width() const noexcept;
     [[nodiscard]] std::uint32_t height() const noexcept;
     [[nodiscard]] const std::string& adapter_name() const noexcept;
@@ -114,6 +122,8 @@ private:
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> rtv_heap_;
     std::array<FrameResource, kFrameCount> frames_{};
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list_;
+    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> command_list4_;
+    Microsoft::WRL::ComPtr<ID3D12Device5> device5_;
     Microsoft::WRL::ComPtr<ID3D12Fence> fence_;
 };
 }

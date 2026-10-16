@@ -188,6 +188,13 @@ bool Win32Window::consume_reload_request() noexcept
     return result;
 }
 
+RendererKeyCommands Win32Window::consume_renderer_commands() noexcept
+{
+    const RendererKeyCommands result = renderer_commands_;
+    renderer_commands_ = {};
+    return result;
+}
+
 bool Win32Window::minimized() const noexcept
 {
     return minimized_ || client_width_ == 0 || client_height_ == 0;
@@ -344,6 +351,13 @@ LRESULT Win32Window::handle_message(HWND native_window, UINT message, WPARAM wpa
             reload_requested_ = true;
             return 0;
         }
+        if (wparam == '1') { renderer_commands_.mode = RendererMode::raster; return 0; }
+        if (wparam == '2') { renderer_commands_.mode = RendererMode::hybrid; return 0; }
+        if (wparam == '3') { renderer_commands_.mode = RendererMode::pathtrace; return 0; }
+        if (wparam == 'N') { renderer_commands_.toggle_denoiser = true; return 0; }
+        if (wparam == 'H') { renderer_commands_.reset_history = true; return 0; }
+        if (wparam == VK_OEM_PLUS || wparam == VK_ADD) { renderer_commands_.exposure_delta += 0.5F; return 0; }
+        if (wparam == VK_OEM_MINUS || wparam == VK_SUBTRACT) { renderer_commands_.exposure_delta -= 0.5F; return 0; }
         break;
 
     case WM_CAPTURECHANGED:

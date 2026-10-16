@@ -1,13 +1,16 @@
 #include "common/Color.hlsli"
 
 Texture2D<float4> scene_color : register(t0);
+SamplerState linear_clamp_sampler : register(s0); // static sampler declared by DisplayOutput's root signature
 
 cbuffer ToneMapConstants : register(b0)
 {
     float exposure_ev;
-    uint diagnostic_mode;
+    uint diagnostic_mode;  // 0 = shaded (exposure + ACES-fit); non-zero = saturated passthrough of [0,1] diagnostics
+    uint resample;         // 0 = 1:1 Load (Campaign C2 path); 1 = explicit bilinear resample to the display size
     uint padding0;
-    uint padding1;
+    float2 source_size;
+    float2 output_size;
 };
 
 struct FullscreenVertexOutput
@@ -27,7 +30,18 @@ FullscreenVertexOutput VSMain(uint vertex_id : SV_VertexID)
 float4 PSMain(FullscreenVertexOutput input) : SV_Target0
 {
     const int2 pixel = int2(input.position.xy);
-    const float4 source = scene_color.Load(int3(pixel, 0));
+    float4 source;
+    if (resample == 0u)
+    {
+        source = scene_color.Load(int3(pixel, 0));
+    }
+    else
+    {
+        // Bilinear resampling of LINEAR HDR radiance before exposure/tone mapping. This is the
+        // explicitly non-temporal "bilinear" upscaler; it never touches tone-mapped values.
+        const float2 uv = (float2(pixel) + 0.5) / output_size;
+        source = scene_color.SampleLevel(linear_clamp_sampler, uv, 0.0);
+    }
     float3 linear_display;
     if (any(isnan(source.rgb)) || any(isinf(source.rgb)))
     {

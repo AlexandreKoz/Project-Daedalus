@@ -21,10 +21,16 @@ struct PreparedTextureBinding
 struct PreparedRasterDraw
 {
     std::uint32_t primitive_index = 0;
+    // Canonical node that instantiates the primitive. Together with the draw's position in the
+    // prepared list (the stable instance ID) this lets raster, DXR and temporal passes agree.
+    std::uint32_t node_index = 0;
+    // Material table index shared by raster IDs and DXR material tables: 0 = canonical default
+    // material, i + 1 = source material i (identical to material_diagnostic_id).
+    std::uint32_t material_table_index = 0;
     Mat4 world = identity_matrix();
     Vec3 world_bounds_center{};
     Vec4 base_color_factor{1.0F, 1.0F, 1.0F, 1.0F};
-    Vec3 emissive_factor{};
+    Vec3 emissive_factor{}; // includes KHR_materials_emissive_strength
     float metallic_factor = 1.0F;
     float roughness_factor = 1.0F;
     float normal_scale = 1.0F;

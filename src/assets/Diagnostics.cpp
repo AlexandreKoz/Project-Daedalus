@@ -92,6 +92,21 @@ std::string_view to_string(DiagnosticCode value) noexcept
     case DiagnosticCode::implicit_scene_created: return "implicit_scene_created";
     case DiagnosticCode::bounds_recomputed: return "bounds_recomputed";
     case DiagnosticCode::internal_invariant: return "internal_invariant";
+    case DiagnosticCode::unsupported_source_format: return "unsupported_source_format";
+    case DiagnosticCode::compatibility_importer_unavailable: return "compatibility_importer_unavailable";
+    case DiagnosticCode::material_approximated: return "material_approximated";
+    case DiagnosticCode::axis_converted: return "axis_converted";
+    case DiagnosticCode::unit_converted: return "unit_converted";
+    case DiagnosticCode::tangents_generated: return "tangents_generated";
+    case DiagnosticCode::normals_generated: return "normals_generated";
+    case DiagnosticCode::texture_resolved_by_search: return "texture_resolved_by_search";
+    case DiagnosticCode::ambiguous_dependency: return "ambiguous_dependency";
+    case DiagnosticCode::external_converter_failed: return "external_converter_failed";
+    case DiagnosticCode::external_converter_warning: return "external_converter_warning";
+    case DiagnosticCode::cache_hit: return "cache_hit";
+    case DiagnosticCode::cache_corrupt: return "cache_corrupt";
+    case DiagnosticCode::cache_stale: return "cache_stale";
+    case DiagnosticCode::feature_discarded: return "feature_discarded";
     }
     return "internal_invariant";
 }

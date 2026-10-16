@@ -99,6 +99,9 @@ std::string ImportReport::to_json() const
     root.emplace("extensions", std::move(extensions));
     root.emplace("import_settings", import_settings);
     root.emplace("local_bounds", bounds_json(local_bounds));
+    JsonValue::Object provenance_object;
+    for (const auto& [key, value] : provenance) provenance_object.emplace(key, value);
+    root.emplace("provenance", std::move(provenance_object));
     root.emplace("report_schema_version", std::string(schema_version));
     root.emplace("selected_scene", selected_scene);
     root.emplace("source_display_name", source_display_name);
@@ -150,7 +153,8 @@ ImportReport make_import_report(const CanonicalScene& scene,
     report.dependencies = scene.source.dependencies;
     report.extensions_used = scene.source.extensions_used;
     report.extensions_required = scene.source.extensions_required;
-    report.extensions_supported = {"KHR_lights_punctual", "KHR_mesh_quantization"};
+    report.extensions_supported = {"KHR_lights_punctual", "KHR_materials_emissive_strength", "KHR_materials_ior",
+                                   "KHR_materials_transmission", "KHR_materials_volume", "KHR_mesh_quantization"};
     report.diagnostics = std::move(diagnostics);
     sort_diagnostics(report.diagnostics);
 
