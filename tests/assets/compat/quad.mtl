@@ -1,0 +1,6 @@
+# Daedalus Campaign H compatibility fixture (CC0).
+newmtl checker
+Kd 1.0 1.0 1.0
+Ns 96.0
+d 1.0
+map_Kd Textures\Checker.PNG

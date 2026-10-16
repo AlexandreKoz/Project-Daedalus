@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace daedalus
@@ -58,6 +59,11 @@ struct ImportReport
     [[nodiscard]] std::string to_json() const;
     [[nodiscard]] std::string summary() const;
 };
+
+// Inverse of ImportReport::to_json for reports this build wrote (used by the asset cache to return
+// the original import diagnostics on a hit). Throws std::runtime_error on malformed input or on
+// unknown enumeration names.
+[[nodiscard]] ImportReport import_report_from_json(std::string_view json);
 
 [[nodiscard]] ImportReport make_import_report(const CanonicalScene& scene,
                                               ImportStatus status,

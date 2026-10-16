@@ -94,7 +94,8 @@ enum class DiagnosticCode : std::uint32_t
     cache_hit,
     cache_corrupt,
     cache_stale,
-    feature_discarded
+    feature_discarded,
+    malformed_source
 };
 
 struct Diagnostic

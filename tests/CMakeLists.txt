@@ -22,3 +22,35 @@ target_link_libraries(DaedalusRenderingTests PRIVATE daedalus_scene daedalus_ren
 target_include_directories(DaedalusRenderingTests PRIVATE "${PROJECT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
 daedalus_apply_project_warnings(DaedalusRenderingTests)
 add_test(NAME Daedalus.Rendering COMMAND DaedalusRenderingTests)
+
+# Campaigns D-H (portable CPU contracts; the GPU paths have no automated CPU test).
+add_executable(DaedalusRendererOptionsTests RendererOptionsTests.cpp TestHarness.h)
+target_link_libraries(DaedalusRendererOptionsTests PRIVATE daedalus_core)
+target_include_directories(DaedalusRendererOptionsTests PRIVATE "${PROJECT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
+daedalus_apply_project_warnings(DaedalusRendererOptionsTests)
+add_test(NAME Daedalus.RendererOptions COMMAND DaedalusRendererOptionsTests)
+
+add_executable(DaedalusRayTracingTests RayTracingTests.cpp TestHarness.h)
+target_link_libraries(DaedalusRayTracingTests PRIVATE daedalus_scene daedalus_rendering)
+target_include_directories(DaedalusRayTracingTests PRIVATE "${PROJECT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
+daedalus_apply_project_warnings(DaedalusRayTracingTests)
+add_test(NAME Daedalus.RayTracing COMMAND DaedalusRayTracingTests)
+
+add_executable(DaedalusPathTracingTests PathTracingTests.cpp TestHarness.h)
+target_link_libraries(DaedalusPathTracingTests PRIVATE daedalus_rendering)
+target_include_directories(DaedalusPathTracingTests PRIVATE "${PROJECT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
+daedalus_apply_project_warnings(DaedalusPathTracingTests)
+add_test(NAME Daedalus.PathTracing COMMAND DaedalusPathTracingTests)
+
+add_executable(DaedalusTemporalTests TemporalTests.cpp TestHarness.h)
+target_link_libraries(DaedalusTemporalTests PRIVATE daedalus_rendering)
+target_include_directories(DaedalusTemporalTests PRIVATE "${PROJECT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
+daedalus_apply_project_warnings(DaedalusTemporalTests)
+add_test(NAME Daedalus.Temporal COMMAND DaedalusTemporalTests)
+
+add_executable(DaedalusAssetPipelineTests AssetPipelineTests.cpp TestHarness.h)
+target_link_libraries(DaedalusAssetPipelineTests PRIVATE daedalus_assets daedalus_scene)
+target_include_directories(DaedalusAssetPipelineTests PRIVATE "${PROJECT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(DaedalusAssetPipelineTests PRIVATE "DAEDALUS_FIXTURE_ROOT=\"${PROJECT_SOURCE_DIR}/tests/assets\"")
+daedalus_apply_project_warnings(DaedalusAssetPipelineTests)
+add_test(NAME Daedalus.AssetPipeline COMMAND DaedalusAssetPipelineTests)

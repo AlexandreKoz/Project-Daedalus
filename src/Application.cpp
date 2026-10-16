@@ -485,6 +485,7 @@ void Application::load_scene()
     load.texture_search_roots = options_.texture_search_roots;
     load.blender_executable = options_.blender_executable;
     load.blender_timeout_seconds = options_.blender_timeout_seconds;
+    load.blender_script = executable_directory_ / "scripts" / "blender" / "daedalus_blend_export.py";
     load.temporary_directory = executable_directory_ / "runtime" / "conversion";
     AssetLoadResult result = load_asset(load);
     import_report_ = result.import.report;

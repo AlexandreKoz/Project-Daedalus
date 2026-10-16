@@ -4,7 +4,9 @@
 #include "core/Version.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <sstream>
+#include <stdexcept>
 
 namespace daedalus
 {
@@ -134,6 +136,123 @@ std::string ImportReport::summary() const
            << "  source_sha256=" << source_sha256 << '\n'
            << "  asset_key=" << deterministic_asset_key << '\n';
     return output.str();
+}
+
+namespace
+{
+const JsonValue& member(const JsonValue& object, std::string_view key)
+{
+    const JsonValue* value = object.find(key);
+    if (value == nullptr) throw std::runtime_error("import report is missing '" + std::string(key) + "'");
+    return *value;
+}
+
+std::string text(const JsonValue& object, std::string_view key)
+{
+    return member(object, key).as_string();
+}
+
+std::uint64_t count(const JsonValue& object, std::string_view key)
+{
+    const double value = member(object, key).as_number();
+    if (!(value >= 0.0)) throw std::runtime_error("import report field '" + std::string(key) + "' is negative");
+    return static_cast<std::uint64_t>(value);
+}
+
+std::vector<std::string> strings(const JsonValue& object, std::string_view key)
+{
+    std::vector<std::string> result;
+    for (const JsonValue& value : member(object, key).as_array()) result.push_back(value.as_string());
+    return result;
+}
+
+Aabb bounds_from(const JsonValue& value)
+{
+    Aabb bounds;
+    if (member(value, "empty").as_bool()) return bounds;
+    const auto vector = [&](std::string_view key)
+    {
+        const JsonValue::Array& array = member(value, key).as_array();
+        if (array.size() != 3U) throw std::runtime_error("import report bounds vector must have three components");
+        return Vec3{static_cast<float>(array[0].as_number()), static_cast<float>(array[1].as_number()),
+                    static_cast<float>(array[2].as_number())};
+    };
+    bounds.minimum = vector("minimum");
+    bounds.maximum = vector("maximum");
+    return bounds;
+}
+
+template <typename Enum>
+Enum enum_from(std::string_view name, std::uint32_t last, std::string_view what)
+{
+    for (std::uint32_t index = 0; index <= last; ++index)
+        if (to_string(static_cast<Enum>(index)) == name) return static_cast<Enum>(index);
+    throw std::runtime_error("import report contains an unknown " + std::string(what) + " '" + std::string(name) + "'");
+}
+}
+
+ImportReport import_report_from_json(std::string_view json)
+{
+    const JsonValue root = parse_json(json);
+    if (text(root, "report_schema_version") != ImportReport::schema_version)
+        throw std::runtime_error("import report schema version differs");
+    ImportReport report;
+    report.deterministic_asset_key = text(root, "asset_key");
+    report.canonical_schema_version = text(root, "canonical_schema_version");
+    const JsonValue& counts = member(root, "counts");
+    report.counts.cameras = count(counts, "cameras");
+    report.counts.images = count(counts, "images");
+    report.counts.indices = count(counts, "indices");
+    report.counts.lights = count(counts, "lights");
+    report.counts.materials = count(counts, "materials");
+    report.counts.meshes = count(counts, "meshes");
+    report.counts.nodes = count(counts, "nodes");
+    report.counts.primitives = count(counts, "primitives");
+    report.counts.roots = count(counts, "roots");
+    report.counts.samplers = count(counts, "samplers");
+    report.counts.scenes = count(counts, "scenes");
+    report.counts.textures = count(counts, "textures");
+    report.counts.vertices = count(counts, "vertices");
+    const JsonValue& usage = member(root, "resource_usage");
+    report.resource_usage.buffer_payload_bytes = count(usage, "buffer_payload_bytes");
+    report.resource_usage.canonical_geometry_bytes = count(usage, "canonical_geometry_bytes");
+    report.resource_usage.conservative_peak_bytes = count(usage, "conservative_peak_bytes");
+    report.resource_usage.decoded_image_bytes = count(usage, "decoded_image_bytes");
+    report.resource_usage.encoded_image_bytes = count(usage, "encoded_image_bytes");
+    report.resource_usage.retained_bytes = count(usage, "retained_bytes");
+    report.resource_usage.source_payload_bytes = count(usage, "source_payload_bytes");
+    for (const JsonValue& value : member(root, "dependencies").as_array())
+        report.dependencies.push_back({text(value, "path"), text(value, "sha256"), count(value, "byte_size")});
+    for (const JsonValue& value : member(root, "diagnostics").as_array())
+    {
+        Diagnostic diagnostic;
+        diagnostic.code = enum_from<DiagnosticCode>(text(value, "code"), static_cast<std::uint32_t>(DiagnosticCode::malformed_source), "diagnostic code");
+        diagnostic.disposition = enum_from<DiagnosticDisposition>(text(value, "disposition"),
+                                                                  static_cast<std::uint32_t>(DiagnosticDisposition::observed), "disposition");
+        diagnostic.severity = enum_from<DiagnosticSeverity>(text(value, "severity"), static_cast<std::uint32_t>(DiagnosticSeverity::error), "severity");
+        diagnostic.expected = text(value, "expected");
+        diagnostic.location = text(value, "location");
+        diagnostic.message = text(value, "message");
+        diagnostic.observed = text(value, "observed");
+        report.diagnostics.push_back(std::move(diagnostic));
+    }
+    const JsonValue& extensions = member(root, "extensions");
+    report.extensions_ignored = strings(extensions, "ignored");
+    report.extensions_rejected = strings(extensions, "rejected");
+    report.extensions_required = strings(extensions, "required");
+    report.extensions_supported = strings(extensions, "supported");
+    report.extensions_used = strings(extensions, "used");
+    report.import_settings = text(root, "import_settings");
+    report.local_bounds = bounds_from(member(root, "local_bounds"));
+    for (const auto& [key, value] : member(root, "provenance").as_object()) report.provenance.emplace(key, value.as_string());
+    report.selected_scene = text(root, "selected_scene");
+    report.source_display_name = text(root, "source_display_name");
+    report.source_format = text(root, "source_format");
+    report.source_sha256 = text(root, "source_sha256");
+    report.status = enum_from<ImportStatus>(text(root, "status"), static_cast<std::uint32_t>(ImportStatus::internal_error), "status");
+    report.tool_version = text(root, "tool_version");
+    report.world_bounds = bounds_from(member(root, "world_bounds"));
+    return report;
 }
 
 ImportReport make_import_report(const CanonicalScene& scene,

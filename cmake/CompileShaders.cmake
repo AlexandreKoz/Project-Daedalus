@@ -83,3 +83,49 @@ function(daedalus_compile_shader_pair target_name shader_source output_directory
     set(${target_name}_VERTEX_SHADER "${_vertex_output}" PARENT_SCOPE)
     set(${target_name}_PIXEL_SHADER "${_pixel_output}" PARENT_SCOPE)
 endfunction()
+
+# Generic single-output DXC rule (Campaigns D-F). Shader sources include each other relative to the
+# shaders/ root ("common/X.hlsli", "raytracing/Y.hlsli", "compute/Z.hlsli"), so INCLUDE_ROOT must be
+# that directory. Library profiles (lib_6_x) take no ENTRY: every [shader("...")] export is kept.
+#
+#   daedalus_compile_shader(TARGET <name> SOURCE <file.hlsl> PROFILE <profile> [ENTRY <entry>]
+#                           OUTPUT_DIRECTORY <dir> OUTPUT_NAME <file.dxil> INCLUDE_ROOT <dir>
+#                           [DEPENDS <includes>...] [EXTRA_FLAGS <flags>...])
+# Sets <name>_OUTPUT in the caller's scope to the per-configuration output path.
+function(daedalus_compile_shader)
+    cmake_parse_arguments(SHADER "" "TARGET;SOURCE;PROFILE;ENTRY;OUTPUT_DIRECTORY;OUTPUT_NAME;INCLUDE_ROOT" "DEPENDS;EXTRA_FLAGS" ${ARGN})
+    foreach(_required TARGET SOURCE PROFILE OUTPUT_DIRECTORY OUTPUT_NAME INCLUDE_ROOT)
+        if(NOT SHADER_${_required})
+            message(FATAL_ERROR "daedalus_compile_shader: ${_required} is required")
+        endif()
+    endforeach()
+    if(NOT SHADER_PROFILE MATCHES "^lib_" AND NOT SHADER_ENTRY)
+        message(FATAL_ERROR "daedalus_compile_shader: ENTRY is required for non-library profile ${SHADER_PROFILE}")
+    endif()
+
+    daedalus_find_dxc(_dxc)
+    set(_configuration_output_directory "${SHADER_OUTPUT_DIRECTORY}/$<CONFIG>")
+    set(_output "${_configuration_output_directory}/${SHADER_OUTPUT_NAME}")
+    set(_entry_arguments)
+    if(SHADER_ENTRY)
+        set(_entry_arguments -E "${SHADER_ENTRY}")
+    endif()
+
+    add_custom_command(
+        OUTPUT "${_output}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_configuration_output_directory}"
+        COMMAND "${_dxc}"
+            -nologo -WX -HV 2021 -T "${SHADER_PROFILE}" ${_entry_arguments}
+            -I "${SHADER_INCLUDE_ROOT}"
+            ${SHADER_EXTRA_FLAGS}
+            "$<$<CONFIG:Debug>:-Zi>" "$<$<CONFIG:Debug>:-O3>" "$<$<CONFIG:Debug>:-Qembed_debug>"
+            "$<$<NOT:$<CONFIG:Debug>>:-O3>"
+            -Fo "${_output}" "${SHADER_SOURCE}"
+        DEPENDS "${SHADER_SOURCE}" ${SHADER_DEPENDS}
+        COMMENT "Compiling ${SHADER_OUTPUT_NAME} (${SHADER_PROFILE}) with DXC"
+        COMMAND_EXPAND_LISTS
+        VERBATIM)
+
+    add_custom_target(${SHADER_TARGET} DEPENDS "${_output}")
+    set(${SHADER_TARGET}_OUTPUT "${_output}" PARENT_SCOPE)
+endfunction()

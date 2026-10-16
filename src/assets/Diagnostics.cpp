@@ -107,6 +107,7 @@ std::string_view to_string(DiagnosticCode value) noexcept
     case DiagnosticCode::cache_corrupt: return "cache_corrupt";
     case DiagnosticCode::cache_stale: return "cache_stale";
     case DiagnosticCode::feature_discarded: return "feature_discarded";
+    case DiagnosticCode::malformed_source: return "malformed_source";
     }
     return "internal_invariant";
 }

@@ -4,6 +4,7 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
