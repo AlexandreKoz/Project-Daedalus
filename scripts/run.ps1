@@ -76,7 +76,7 @@ if ($PSBoundParameters.ContainsKey("CaptureSamples") -and $CaptureSamples -eq 0)
 if ($CaptureSamples -gt 0 -and $Renderer -ne "pathtrace") { throw "CaptureSamples requires -Renderer pathtrace." }
 
 function Resolve-OutputPath([string]$Path, [string]$BaseDirectory) {
-    if ([System.IO.Path]::IsPathFullyQualified($Path)) {
+    if ([System.IO.Path]::IsPathRooted($Path)) {
         return [System.IO.Path]::GetFullPath($Path)
     }
     return [System.IO.Path]::GetFullPath((Join-Path $BaseDirectory $Path))

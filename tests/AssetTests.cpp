@@ -1,13 +1,22 @@
 #include "TestHarness.h"
 #include "assets/GltfImporter.h"
+#include "assets/ImageDecoder.h"
+#include "assets/ImageEncoder.h"
 #include "core/Json.h"
 #include "rendering/RasterPreparation.h"
 
 #include <algorithm>
+#include <array>
+#include <iterator>
+#include <span>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
+
+#if defined(_WIN32)
+#include <objbase.h>
+#endif
 
 #ifndef DAEDALUS_FIXTURE_ROOT
 #error DAEDALUS_FIXTURE_ROOT must be defined
@@ -22,6 +31,38 @@ const std::filesystem::path kRoot = DAEDALUS_FIXTURE_ROOT;
 ImportResult load(std::string_view relative, const ImportSettings& settings = {})
 {
     return GltfImporter{}.import_file(kRoot / std::filesystem::path(relative), settings);
+}
+
+void test_png_encoder_round_trip()
+{
+#if defined(_WIN32)
+    // Tests run outside the viewer, which normally owns COM initialization.
+    const HRESULT com_result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    require(SUCCEEDED(com_result) || com_result == RPC_E_CHANGED_MODE, "initialize COM for PNG round trip");
+    struct ComGuard
+    {
+        bool initialized;
+        ~ComGuard() { if (initialized) CoUninitialize(); }
+    } com_guard{SUCCEEDED(com_result)};
+#endif
+    // Distinct channels and a non-opaque alpha expose accidental RGBA/BGRA swaps.
+    const std::array<std::byte, 16> pixels{
+        std::byte{255}, std::byte{0},   std::byte{0},   std::byte{255},
+        std::byte{0},   std::byte{255}, std::byte{0},   std::byte{255},
+        std::byte{0},   std::byte{0},   std::byte{255}, std::byte{255},
+        std::byte{241}, std::byte{103}, std::byte{17}, std::byte{37}};
+    const auto path = std::filesystem::temp_directory_path() / "daedalus-png-encoder-roundtrip.png";
+    encode_png_rgba8(path, 2U, 2U, pixels);
+    std::ifstream input(path, std::ios::binary);
+    require(input.good(), "PNG round trip output must exist");
+    const std::vector<char> encoded_chars{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+    const std::span<const std::byte> encoded{reinterpret_cast<const std::byte*>(encoded_chars.data()), encoded_chars.size()};
+    const DecodedImage decoded = decode_image_rgba8(encoded, "image/png");
+    require(decoded.width == 2U && decoded.height == 2U, "PNG round trip dimensions");
+    require(std::equal(pixels.begin(), pixels.end(), decoded.rgba8.begin(), decoded.rgba8.end()),
+            "PNG round trip must preserve exact RGBA channel and alpha values");
+    input.close();
+    std::filesystem::remove(path);
 }
 
 void test_minimal_glb()
@@ -492,6 +533,7 @@ void test_invalid_fixtures()
 int main()
 {
     return daedalus::tests::run({
+        {"PNG RGBA8 encoder round trip", test_png_encoder_round_trip},
         {"minimal GLB", test_minimal_glb},
         {"external scene", test_external_scene},
         {"scene selection", test_scene_selection},

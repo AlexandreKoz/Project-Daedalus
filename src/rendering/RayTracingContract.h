@@ -4,7 +4,7 @@
 // deliberately do not reuse the packed raster constant blocks. Field order/offsets are frozen by
 // static_assert and mirrored field-for-field in HLSL.
 
-#include "scene/Math.h"
+#include "scene/Scene.h"
 
 #include <array>
 #include <cstddef>

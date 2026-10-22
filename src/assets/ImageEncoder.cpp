@@ -1,6 +1,8 @@
 #include "assets/ImageEncoder.h"
 
+#include <algorithm>
 #include <limits>
+#include <vector>
 #include <stdexcept>
 #include <string>
 
@@ -63,14 +65,19 @@ void encode_png_rgba8(const std::filesystem::path& path,
     if (FAILED(encoder->CreateNewFrame(&frame, &properties)) || FAILED(frame->Initialize(properties.Get())) ||
         FAILED(frame->SetSize(width, height)))
         throw std::runtime_error("WIC PNG frame initialization failed");
-    WICPixelFormatGUID format = GUID_WICPixelFormat32bppRGBA;
-    if (FAILED(frame->SetPixelFormat(&format)) || format != GUID_WICPixelFormat32bppRGBA)
-        throw std::runtime_error("WIC PNG encoder does not support RGBA8 output");
+    // The Windows PNG encoder accepts 32bppBGRA, not 32bppRGBA. Preserve the public
+    // RGBA8 contract by converting into the encoder's native byte order explicitly.
+    WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+    if (FAILED(frame->SetPixelFormat(&format)) || format != GUID_WICPixelFormat32bppBGRA)
+        throw std::runtime_error("WIC PNG encoder does not support BGRA8 output");
     const std::uint64_t stride64 = static_cast<std::uint64_t>(width) * 4ULL;
     if (stride64 > std::numeric_limits<UINT>::max() || rgba8.size() > std::numeric_limits<UINT>::max())
         throw std::overflow_error("PNG output exceeds WIC WritePixels limits");
-    if (FAILED(frame->WritePixels(height, static_cast<UINT>(stride64), static_cast<UINT>(rgba8.size()),
-                                  reinterpret_cast<BYTE*>(const_cast<std::byte*>(rgba8.data())))) ||
+    std::vector<std::byte> bgra8(rgba8.begin(), rgba8.end());
+    for (std::size_t i = 0; i < bgra8.size(); i += 4U)
+        std::swap(bgra8[i], bgra8[i + 2U]);
+    if (FAILED(frame->WritePixels(height, static_cast<UINT>(stride64), static_cast<UINT>(bgra8.size()),
+                                  reinterpret_cast<BYTE*>(bgra8.data()))) ||
         FAILED(frame->Commit()) || FAILED(encoder->Commit()))
         throw std::runtime_error("WIC PNG encoder failed while writing pixels");
 #else

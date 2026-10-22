@@ -46,6 +46,7 @@ void test_renderer_flags()
     require(!hybrid.renderer.hybrid.shadows, "--rt-shadows off");
     require_near(hybrid.renderer.hybrid.reflection_max_roughness, 0.3F, 1.0e-6F, "--rt-reflection-max-roughness");
     require(hybrid.renderer.temporal.jitter, "--jitter on");
+    require(!parse({L"--jitter", L"off"}).renderer.temporal.jitter, "--jitter off");
     require(hybrid.renderer.temporal.debug_view == TemporalDebugView::motion, "--temporal-debug motion");
     require(hybrid.renderer.camera_script.kind == CameraScriptKind::orbit, "--camera-path orbit");
     require(hybrid.renderer.node_animations.size() == 1U && hybrid.renderer.node_animations[0].node == 2U, "--animate-node");

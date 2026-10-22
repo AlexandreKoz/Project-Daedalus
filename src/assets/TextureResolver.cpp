@@ -14,7 +14,7 @@ namespace
     return value;
 }
 
-[[nodiscard]] bool is_regular_file(const std::filesystem::path& path) noexcept
+[[nodiscard]] bool is_regular_file_safe(const std::filesystem::path& path) noexcept
 {
     std::error_code error;
     return std::filesystem::is_regular_file(path, error) && !error;
@@ -60,7 +60,7 @@ namespace
         if (match == entries.end()) return {};
         current = *match;
     }
-    return is_regular_file(current) ? current : std::filesystem::path{};
+    return is_regular_file_safe(current) ? current : std::filesystem::path{};
 }
 
 [[nodiscard]] bool has_parent_reference(const std::filesystem::path& path)
@@ -164,7 +164,7 @@ TextureResolution resolve_texture_reference(std::string_view reference, const Te
         {
             const std::filesystem::path& root = roots[root_index];
             const std::filesystem::path candidate = root / relative;
-            if (is_regular_file(candidate) && allowed(candidate))
+            if (is_regular_file_safe(candidate) && allowed(candidate))
                 return accept(candidate, root_index == 0U ? "exact" : "search-root");
             if (!has_parent_reference(relative))
             {
@@ -176,7 +176,7 @@ TextureResolution resolve_texture_reference(std::string_view reference, const Te
         if (has_parent_reference(relative))
         {
             const std::filesystem::path candidate = options.asset_directory / relative;
-            if (is_regular_file(candidate) && !allowed(candidate))
+            if (is_regular_file_safe(candidate) && !allowed(candidate))
             {
                 result.status = TextureResolveStatus::rejected;
                 result.message = "relative reference escapes the asset directory and every configured search root";
@@ -195,10 +195,30 @@ TextureResolution resolve_texture_reference(std::string_view reference, const Te
     }
     for (const std::filesystem::path& root : roots)
     {
-        const std::filesystem::path candidate = case_insensitive_lookup(root, basename);
-        if (!candidate.empty() && allowed(candidate) &&
-            std::find(result.candidates.begin(), result.candidates.end(), candidate) == result.candidates.end())
-            result.candidates.push_back(candidate);
+        // Prefer a top-level match, then search nested texture directories. Do not
+        // follow directory symlinks or allow a candidate outside a configured root.
+        std::vector<std::filesystem::path> matches;
+        const std::filesystem::path direct = case_insensitive_lookup(root, basename);
+        std::error_code error;
+        std::filesystem::recursive_directory_iterator iterator(root, std::filesystem::directory_options::skip_permission_denied, error);
+        const std::filesystem::recursive_directory_iterator end;
+        while (!error && iterator != end)
+        {
+            const auto& entry = *iterator;
+            std::error_code entry_error;
+            if (lowercase(entry.path().filename().generic_string()) == lowercase(basename) &&
+                entry.is_regular_file(entry_error) && !entry_error)
+                matches.push_back(entry.path());
+            iterator.increment(error);
+        }
+        std::sort(matches.begin(), matches.end());
+        matches.erase(std::unique(matches.begin(), matches.end()), matches.end());
+        // A texture next to the asset wins over identically named nested files.
+        if (!direct.empty()) matches.insert(matches.begin(), direct);
+        for (const auto& candidate : matches)
+            if (allowed(candidate) &&
+                std::find(result.candidates.begin(), result.candidates.end(), candidate) == result.candidates.end())
+                result.candidates.push_back(candidate);
     }
     if (result.candidates.empty())
     {

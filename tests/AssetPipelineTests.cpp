@@ -86,6 +86,7 @@ void test_texture_resolver()
     const TextureResolution authoring = resolve_texture_reference("C:\\Users\\artist\\maps\\Wood.png", options);
     require(authoring.status == TextureResolveStatus::resolved && authoring.strategy == "basename",
             "absolute authoring paths resolve by basename only");
+    require(authoring.path == asset / "textures" / "Wood.png", "basename recovery locates nested textures");
 
     const TextureResolution search = resolve_texture_reference("stone.png", options);
     require(search.status == TextureResolveStatus::resolved, "search roots are consulted");

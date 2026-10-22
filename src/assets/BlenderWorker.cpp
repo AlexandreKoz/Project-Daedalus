@@ -297,21 +297,30 @@ std::optional<std::filesystem::path> locate_blender_executable(const std::filesy
         if (std::filesystem::is_regular_file(configured, error) && !error) return configured;
         return std::nullopt;
     }
-    const char* path_variable = std::getenv("PATH");
-    if (path_variable == nullptr) return std::nullopt;
 #ifdef _WIN32
-    constexpr char separator = ';';
-    const char* names[] = {"blender.exe"};
+    // Use the wide CRT environment API: it avoids MSVC's unsafe-getenv warning
+    // and preserves non-ASCII directories in a Windows PATH.
+    wchar_t* raw_path = nullptr;
+    std::size_t path_length = 0;
+    if (_wdupenv_s(&raw_path, &path_length, L"PATH") != 0 || raw_path == nullptr) return std::nullopt;
+    const std::wstring path_value(raw_path);
+    std::free(raw_path);
+    std::wstringstream stream{path_value};
+    std::wstring directory;
+    constexpr wchar_t separator = L';';
+    constexpr const wchar_t* names[] = {L"blender.exe"};
 #else
-    constexpr char separator = ':';
-    const char* names[] = {"blender"};
-#endif
-    std::stringstream stream{std::string(path_variable)};
+    const char* raw_path = std::getenv("PATH");
+    if (raw_path == nullptr) return std::nullopt;
+    std::stringstream stream{std::string(raw_path)};
     std::string directory;
+    constexpr char separator = ':';
+    constexpr const char* names[] = {"blender"};
+#endif
     while (std::getline(stream, directory, separator))
     {
         if (directory.empty()) continue;
-        for (const char* name : names)
+        for (const auto* name : names)
         {
             const std::filesystem::path candidate = std::filesystem::path(directory) / name;
             if (std::filesystem::is_regular_file(candidate, error) && !error) return candidate;

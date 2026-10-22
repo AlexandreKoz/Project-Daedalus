@@ -131,7 +131,7 @@ void RaytracingScene::create_root_signature()
     description.NumParameters = static_cast<UINT>(parameters.size());
     description.pParameters = parameters.data();
     description.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
-    root_signature_ = create_root_signature(device_, description, "DXR global");
+    root_signature_ = daedalus::create_root_signature(device_, description, "DXR global");
 }
 
 void RaytracingScene::create_tables()

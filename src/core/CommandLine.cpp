@@ -348,7 +348,7 @@ CommandLineOptions parse_command_line(std::span<const std::wstring_view> argumen
             options.renderer.temporal.max_history_length = static_cast<std::uint32_t>(parse_positive_integer(require_value(arguments, index, "--history-length"), "--history-length"));
         else if (argument == L"--history-clip")
             options.renderer.temporal.history_clip_gamma = parse_float_in_range(require_value(arguments, index, "--history-clip"), "--history-clip", 0.0F, 16.0F);
-        else if (argument == L"--jitter") options.renderer.temporal.jitter = true;
+        else if (argument == L"--jitter") options.renderer.temporal.jitter = parse_on_off(require_value(arguments, index, "--jitter"), "--jitter");
         else if (argument == L"--temporal-debug")
             options.renderer.temporal.debug_view = require_parsed(parse_temporal_debug_view(narrow_ascii(require_value(arguments, index, "--temporal-debug"), "--temporal-debug")),
                 "--temporal-debug", "none, motion, depth, normals, disocclusion, history-length, variance, reactive, raw-signal");
@@ -543,7 +543,7 @@ std::string usage_text()
         "  --atrous-iterations <n>        Edge-aware a-trous iterations (0-5), default 4.\n"
         "  --history-length <n>           Maximum temporal history length, default 32.\n"
         "  --history-clip <gamma>         Neighbourhood history clip in std-devs (0 = off).\n"
-        "  --jitter                       Halton(2,3) projection jitter (motion vectors stay jitter-free).\n"
+        "  --jitter on|off                Halton(2,3) projection jitter (motion vectors stay jitter-free).\n"
         "  --temporal-debug <view>        none, motion, depth, normals, disocclusion, history-length,\n"
         "                                 variance, reactive, raw-signal.\n"
         "  --upscaler none|bilinear|dlss  Output reconstruction; dlss requires an opt-in SDK build.\n"
