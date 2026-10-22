@@ -25,6 +25,8 @@ CMakeUserPresets.json
 *.pdb
 *.ilk
 *.obj
+# Campaign H compatibility fixtures are hand-authored text sources, not build objects.
+!tests/assets/compat/*.obj
 *.lib
 *.exp
 *.exe

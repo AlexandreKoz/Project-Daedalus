@@ -36,6 +36,7 @@ Mode switches, resizes and reloads happen in `prepare_frame()`/`resize()` before
 
 - **Integrator:** an iterative path in raygen.
   - Next-event estimation picks one light per vertex among punctual (delta), emissive triangles (power-proportional alias table) and the analytic sky (sun-lobe/uniform mixture). Category probabilities come from the CPU.
+  - Scope limit: the environment sampler is specific to the analytic sky. Image-based environment maps (import, CDF construction, importance sampling) are **not implemented**.
   - Next-event estimation is combined with BSDF sampling using the power heuristic. Russian roulette starts at `--pt-rr-depth`.
   - Non-finite samples are discarded and counted (`RtCounter`).
 - **RNG:** `pcg4d(pixel, global sample index, seed)` followed by a PCG stream. The CPU mirror is in `PathTracingMath`.

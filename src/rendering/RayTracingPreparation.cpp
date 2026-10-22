@@ -171,8 +171,11 @@ RtSceneTables prepare_ray_tracing_tables(const CanonicalScene& scene,
             throw std::runtime_error("canonical primitive references an invalid material");
         RtGeometryData geometry;
         const auto primitive_index = static_cast<std::uint32_t>(index);
-        geometry.vertex_buffer_descriptor = layout.vertex_buffer(primitive_index);
-        geometry.index_buffer_descriptor = layout.index_buffer(primitive_index);
+        // Table-relative: g_buffers[] (t0, space2) is bound with its base at layout.raw_base().
+        geometry.vertex_buffer_descriptor = layout.vertex_buffer_table_index(primitive_index);
+        geometry.index_buffer_descriptor = layout.index_buffer_table_index(primitive_index);
+        if (geometry.index_buffer_descriptor >= layout.raw_buffer_table_size())
+            throw std::logic_error("DXR raw-buffer descriptor index exceeds the bound g_buffers table");
         geometry.vertex_count = static_cast<std::uint32_t>(primitive.vertices.size());
         geometry.index_count = static_cast<std::uint32_t>(primitive.indices.size());
         geometry.vertex_stride = static_cast<std::uint32_t>(sizeof(Vertex));

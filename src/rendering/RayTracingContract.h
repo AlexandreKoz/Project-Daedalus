@@ -27,7 +27,7 @@ struct alignas(16) RtInstanceData
 // StructuredBuffer<RtGeometryData> (t2): one entry per canonical primitive (one BLAS each).
 struct alignas(16) RtGeometryData
 {
-    std::uint32_t vertex_buffer_descriptor = 0;  // raw ByteAddressBuffer SRV index (space2 table)
+    std::uint32_t vertex_buffer_descriptor = 0;  // index into g_buffers[] (t0 space2), RELATIVE to GpuSceneDescriptorLayout::raw_base()
     std::uint32_t index_buffer_descriptor = 0;
     std::uint32_t vertex_count = 0;
     std::uint32_t index_count = 0;

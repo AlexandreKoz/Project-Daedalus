@@ -17,6 +17,8 @@ namespace daedalus
 //   [2 + 2t], [3 + 2t]          scene texture t: linear SRV, sRGB SRV
 //   [raw_base + 2p]             primitive p vertex buffer as ByteAddressBuffer (raw) SRV
 //   [raw_base + 2p + 1]         primitive p index buffer as ByteAddressBuffer (raw) SRV
+//                               (DXR binds a table starting AT raw_base; shaders index it with the
+//                               table-relative 2p / 2p + 1 from *_table_index(), never raw_base + ...)
 //   [dynamic_base, +dynamic)    fixed-size blocks reserved by renderer components
 // Sampler heap:
 //   [0]                         default glTF sampler (linear, repeat)
@@ -65,6 +67,17 @@ struct GpuSceneDescriptorLayout
         return raw_base() + primitive * 2U;
     }
     [[nodiscard]] std::uint32_t index_buffer(std::uint32_t primitive) const { return vertex_buffer(primitive) + 1U; }
+    // Indices RELATIVE to raw_base(), i.e. into a descriptor table whose GPU base handle is
+    // srv_gpu(raw_base()) (the DXR g_buffers[] table). Absolute heap indices from vertex_buffer()/
+    // index_buffer() must never be used to index such a table: the raw-region offset would be
+    // applied twice (audit D-H-STATIC-001).
+    [[nodiscard]] std::uint32_t vertex_buffer_table_index(std::uint32_t primitive) const
+    {
+        check(primitive < primitive_count, "primitive index outside the descriptor layout");
+        return primitive * 2U;
+    }
+    [[nodiscard]] std::uint32_t index_buffer_table_index(std::uint32_t primitive) const { return vertex_buffer_table_index(primitive) + 1U; }
+    [[nodiscard]] std::uint32_t raw_buffer_table_size() const noexcept { return primitive_count * 2U; }
     [[nodiscard]] std::uint32_t dynamic_base() const noexcept { return raw_base() + primitive_count * 2U; }
     [[nodiscard]] std::uint32_t dynamic_block(std::uint32_t block) const
     {

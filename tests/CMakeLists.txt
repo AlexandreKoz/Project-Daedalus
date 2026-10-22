@@ -52,5 +52,15 @@ add_executable(DaedalusAssetPipelineTests AssetPipelineTests.cpp TestHarness.h)
 target_link_libraries(DaedalusAssetPipelineTests PRIVATE daedalus_assets daedalus_scene)
 target_include_directories(DaedalusAssetPipelineTests PRIVATE "${PROJECT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(DaedalusAssetPipelineTests PRIVATE "DAEDALUS_FIXTURE_ROOT=\"${PROJECT_SOURCE_DIR}/tests/assets\"")
+# The OBJ/glTF equivalence case needs the Assimp build and fixtures that only exist after tests/assets/generate_fixtures.py
+# has been run (checker.png, quad_equivalent.gltf). It is compiled in only when they are present at
+# configure time, so an ungenerated checkout neither fails nor reports the case as passed.
+if(DAEDALUS_ENABLE_ASSIMP AND
+   EXISTS "${PROJECT_SOURCE_DIR}/tests/assets/compat/textures/checker.png" AND
+   EXISTS "${PROJECT_SOURCE_DIR}/tests/assets/compat/quad_equivalent.gltf")
+    target_compile_definitions(DaedalusAssetPipelineTests PRIVATE DAEDALUS_COMPAT_FIXTURES_GENERATED)
+else()
+    message(STATUS "OBJ/glTF equivalence test omitted: requires DAEDALUS_ENABLE_ASSIMP=ON and fixtures from tests/assets/generate_fixtures.py")
+endif()
 daedalus_apply_project_warnings(DaedalusAssetPipelineTests)
 add_test(NAME Daedalus.AssetPipeline COMMAND DaedalusAssetPipelineTests)

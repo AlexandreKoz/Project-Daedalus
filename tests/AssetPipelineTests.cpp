@@ -279,11 +279,12 @@ void test_loader_dispatch_and_compatibility_availability()
     }
 }
 
+#ifdef DAEDALUS_COMPAT_FIXTURES_GENERATED
 void test_obj_gltf_equivalence()
 {
 #ifdef DAEDALUS_FIXTURE_ROOT
     const std::filesystem::path root = std::filesystem::path(DAEDALUS_FIXTURE_ROOT) / "compat";
-    if (!compatibility_importer_available()) return; // covered by the availability test above
+    require(compatibility_importer_available(), "equivalence test is only built with DAEDALUS_ENABLE_ASSIMP=ON");
     require(std::filesystem::exists(root / "textures" / "checker.png") && std::filesystem::exists(root / "quad_equivalent.gltf"),
             "compat fixtures missing: run tests/assets/generate_fixtures.py");
     AssetLoadOptions load;
@@ -318,6 +319,7 @@ void test_obj_gltf_equivalence()
             require_near(left[index][component], right[index][component], 1.0e-6F, "OBJ and glTF corners match (UV flip applied)");
 #endif
 }
+#endif
 
 void test_import_report_round_trip()
 {
@@ -358,7 +360,9 @@ int main()
         {"Windows argument quoting", test_windows_argument_quoting},
         {"missing Blender is reported", test_missing_blender_is_reported},
         {"loader dispatch and compatibility availability", test_loader_dispatch_and_compatibility_availability},
+#ifdef DAEDALUS_COMPAT_FIXTURES_GENERATED
         {"OBJ/glTF equivalence", test_obj_gltf_equivalence},
+#endif
         {"import report round trip", test_import_report_round_trip},
         {"PFM round trip", test_pfm_round_trip}});
 }

@@ -34,6 +34,8 @@ struct RtInstanceData
 
 struct RtGeometryData
 {
+    // Both descriptor fields index g_buffers[] directly: they are relative to the table base the CPU
+    // binds (GpuSceneDescriptorLayout::raw_base()), not absolute heap indices. Never add raw_base here.
     uint vertex_buffer_descriptor;
     uint index_buffer_descriptor;
     uint vertex_count;

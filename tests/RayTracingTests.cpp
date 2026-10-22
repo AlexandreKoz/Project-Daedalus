@@ -103,6 +103,28 @@ void test_cornell_tables()
     require(limited.emissive_budget_exceeded || limited.emissive_triangles.size() <= 1U, "emissive budget is enforced");
 }
 
+void test_raw_buffer_descriptors_are_table_relative()
+{
+    // Audit D-H-STATIC-001: g_buffers[] is bound at srv_gpu(layout.raw_base()), so RtGeometryData
+    // must carry table-relative indices. The alpha scene has textures, making raw_base() > 2.
+    const CanonicalScene scene = make_builtin_alpha_instancing_scene();
+    require(!scene.textures.empty(), "fixture scene must have textures so raw_base() is non-trivial");
+    const std::vector<PreparedRasterDraw> draws = prepare_raster_draws(scene);
+    const GpuSceneDescriptorLayout layout = GpuSceneDescriptorLayout::create(scene.textures.size(), scene.primitives.size(), scene.samplers.size());
+    require(layout.raw_base() > GpuSceneDescriptorLayout::kTextureBase, "raw region starts after the texture region");
+    const RtSceneTables tables = prepare_ray_tracing_tables(scene, draws, layout);
+    for (std::size_t index = 0; index < tables.geometries.size(); ++index)
+    {
+        const RtGeometryData& geometry = tables.geometries[index];
+        const auto primitive = static_cast<std::uint32_t>(index);
+        require(geometry.vertex_buffer_descriptor == primitive * 2U, "vertex buffer index is relative to the g_buffers table base");
+        require(geometry.index_buffer_descriptor == primitive * 2U + 1U, "index buffer index is relative to the g_buffers table base");
+        require(layout.raw_base() + geometry.vertex_buffer_descriptor == layout.vertex_buffer(primitive), "relative + base == absolute (vertex)");
+        require(layout.raw_base() + geometry.index_buffer_descriptor == layout.index_buffer(primitive), "relative + base == absolute (index)");
+        require(geometry.index_buffer_descriptor < layout.raw_buffer_table_size(), "index stays inside the bound table");
+    }
+}
+
 void test_instance_transform_update()
 {
     const CanonicalScene scene = make_builtin_alpha_instancing_scene();
@@ -127,5 +149,6 @@ int main()
         {"instance and geometry policies", test_instance_policies},
         {"shader table layout", test_shader_table_layout},
         {"Cornell box ray-tracing tables", test_cornell_tables},
+        {"raw buffer descriptors are table-relative", test_raw_buffer_descriptors_are_table_relative},
         {"instance transform update", test_instance_transform_update}});
 }

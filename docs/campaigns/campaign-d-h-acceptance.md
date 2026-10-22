@@ -29,7 +29,7 @@ The D–H work was delivered as source under an explicit no-build/no-run embargo
 | E-01 | Deterministic RNG (pixel, sample, seed) | NOT RUN | `PathTracingMath`, `PathTracing.hlsl`; CPU test source not executed |
 | E-02 | Multi-bounce GGX + diffuse BSDF | NOT RUN | `PathTracingBsdf.hlsli` |
 | E-03 | Declared transmission model | NOT RUN | Factor-only `KHR_materials_transmission/ior/volume`; transmission textures are reported as ignored |
-| E-04 | NEE + MIS (punctual, emissive alias table, environment) | NOT RUN | `PathTracing.hlsl`, `prepare_ray_tracing_tables` |
+| E-04 | NEE + MIS (punctual, emissive alias table, environment) | NOT RUN | `PathTracing.hlsl`, `prepare_ray_tracing_tables`. Environment importance sampling covers ONLY the analytic `daedalus-procedural-sky-v1` (sun-lobe/uniform mixture); image-based environment maps are neither imported nor importance-sampled (narrower than the charter objective; reported as `image_environment_maps: unsupported` in renderer status) |
 | E-05 | Russian roulette, numeric guards, counters | NOT RUN | `RayTracingCounters.*` |
 | E-06 | RGBA32F progressive accumulation + exact reset policy | NOT RUN | `ReferencePathTracer.*`, `FrameRevision.*` |
 | E-07 | Fixed-sample capture (PNG + linear PFM + metadata) | NOT RUN | `--capture-samples`, `--capture-hdr` |
@@ -71,7 +71,7 @@ The D–H work was delivered as source under an explicit no-build/no-run embargo
 | H-05 | Content-addressed cache (corruption/staleness/atomic publish) | NOT RUN | `AssetCache.*`, `SceneSerialization.*` |
 | H-06 | Batch convert/validate tool | NOT RUN | `DaedalusAssetBatch` |
 | H-07 | Report provenance (`import-report/2`) | NOT RUN | `ImportReport.*`, `AssetLoader.*` |
-| H-08 | OBJ ↔ glTF equivalence fixture | NOT RUN | Generator source added; `generate_fixtures.py` was not run, so `compat/textures/checker.png` and `compat/quad_equivalent.gltf` do not exist yet |
+| H-08 | OBJ ↔ glTF equivalence fixture | NOT RUN | `quad.obj`/`quad.mtl` are committed (a root `.gitignore` `*.obj` rule previously dropped `quad.obj`; now excepted). `checker.png` and `quad_equivalent.gltf` exist only after `generate_fixtures.py` runs; the test is compiled in only with `DAEDALUS_ENABLE_ASSIMP=ON` and those files present at configure time |
 
 ## Unsupported glTF extensions (unchanged scope)
 

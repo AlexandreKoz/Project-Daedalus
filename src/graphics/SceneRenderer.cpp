@@ -796,7 +796,11 @@ std::string SceneRenderer::status_json() const
            << ", \"configuration_unbiased\": " << (path_trace_is_unbiased_reference(settings_.path_trace) ? "true" : "false")
            << ", \"reference_certifiable\": " << (path_trace_reference_certifiable() ? "true" : "false")
            << ", \"rng\": \"pcg4d(pixel.x, pixel.y, sample_index, seed) + pcg32 stream\""
-           << ", \"debug_view\": \"" << to_string(settings_.path_trace.debug_view) << "\"";
+           << ", \"debug_view\": \"" << to_string(settings_.path_trace.debug_view) << "\""
+           // Scope label: the environment importance sampler targets the analytic
+           // daedalus-procedural-sky-v1 only; image-based environment maps are not implemented.
+           << ", \"environment_sampling\": \"analytic-sky-mixture:daedalus-procedural-sky-v1\""
+           << ", \"image_environment_maps\": \"unsupported\"";
     if (path_tracer_ != nullptr)
         stream << ", \"counters_latest\": " << path_tracer_->counters().to_json(path_tracer_->counters().latest())
                << ", \"counters_cumulative\": " << path_tracer_->counters().to_json(path_tracer_->counters().cumulative());
