@@ -77,12 +77,15 @@ std::vector<PreparedRasterDraw> prepare_raster_draws(const CanonicalScene& scene
 
                 PreparedRasterDraw draw;
                 draw.primitive_index = primitive_id.value();
+                draw.node_index = id.value();
                 draw.world = node.world_transform;
                 draw.world_bounds_center = primitive.bounds.empty()
                     ? transform_point(node.world_transform, {})
                     : transform_point(node.world_transform, center(primitive.bounds));
                 draw.base_color_factor = material.base_color_factor;
-                draw.emissive_factor = material.emissive_factor;
+                if (!std::isfinite(material.emissive_strength) || material.emissive_strength < 0.0F)
+                    throw std::runtime_error("canonical material has an invalid emissive strength");
+                draw.emissive_factor = material.emissive_factor * material.emissive_strength;
                 draw.metallic_factor = material.metallic_factor;
                 draw.roughness_factor = material.roughness_factor;
                 draw.normal_scale = material.normal_scale;
@@ -95,6 +98,7 @@ std::vector<PreparedRasterDraw> prepare_raster_draws(const CanonicalScene& scene
                 draw.has_tangents = primitive.has_tangents;
                 draw.uses_default_material = !source_material;
                 draw.material_diagnostic_id = stable_material_diagnostic_id(primitive.material);
+                draw.material_table_index = draw.material_diagnostic_id;
                 draw.base_color = binding_from(material.base_color_texture);
                 draw.metallic_roughness = binding_from(material.metallic_roughness_texture);
                 draw.normal = binding_from(material.normal_texture);

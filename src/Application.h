@@ -11,7 +11,7 @@ namespace daedalus
 {
 class Win32Window;
 class D3D12Context;
-class PbrSceneRenderer;
+class SceneRenderer;
 
 class Application final
 {
@@ -34,19 +34,21 @@ private:
     void reload_scene();
     void write_import_report() const;
     void run_stress_actions(std::uint64_t presented_frames);
+    void complete_capture(std::uint64_t presented_frames);
     void shutdown() noexcept;
 
     CommandLineOptions options_;
     CanonicalScene scene_;
     ImportReport import_report_;
     std::filesystem::path shader_directory_;
+    std::filesystem::path executable_directory_;
     std::optional<std::filesystem::path> primary_asset_path_;
     std::uint64_t stress_reloads_completed_ = 0;
     bool stress_resize_completed_ = false;
     bool alternate_asset_active_ = false;
     std::unique_ptr<Win32Window> window_;
     std::unique_ptr<D3D12Context> graphics_;
-    std::unique_ptr<PbrSceneRenderer> renderer_;
+    std::unique_ptr<SceneRenderer> renderer_;
     bool com_initialized_ = false;
     bool initialized_ = false;
     bool shutdown_complete_ = false;

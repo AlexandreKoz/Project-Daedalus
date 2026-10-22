@@ -7,6 +7,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace daedalus
@@ -140,6 +141,15 @@ struct Material
     AlphaMode alpha_mode = AlphaMode::opaque;
     float alpha_cutoff = 0.5F;
     bool double_sided = false;
+
+    // Conservative glTF material-extension subset (Campaign E). Factors only: the corresponding
+    // extension textures are reported as unsupported by importers rather than silently ignored.
+    float emissive_strength = 1.0F;          // KHR_materials_emissive_strength
+    float transmission_factor = 0.0F;        // KHR_materials_transmission (factor only)
+    float ior = 1.5F;                        // KHR_materials_ior
+    float thickness_factor = 0.0F;           // KHR_materials_volume; 0 = thin-walled
+    float attenuation_distance = 0.0F;       // KHR_materials_volume; 0 = infinite (no absorption)
+    Vec3 attenuation_color{1.0F, 1.0F, 1.0F}; // KHR_materials_volume
 };
 
 enum class FilterMode
@@ -288,5 +298,10 @@ struct CanonicalScene
 [[nodiscard]] bool propagate_world_transforms(CanonicalScene& scene, std::string* error_message = nullptr);
 void recompute_bounds(CanonicalScene& scene);
 [[nodiscard]] CanonicalScene make_builtin_triangle_scene();
+// Deterministic, self-authored validation scenes (Campaign E/F). Geometry is generated in code so
+// no binary fixtures are needed; both pass through propagate_world_transforms/recompute_bounds.
+[[nodiscard]] CanonicalScene make_builtin_cornell_box_scene();
+[[nodiscard]] CanonicalScene make_builtin_alpha_instancing_scene();
+[[nodiscard]] CanonicalScene make_builtin_scene(std::string_view name);
 [[nodiscard]] std::string dump_scene_hierarchy(const CanonicalScene& scene);
 }

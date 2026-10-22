@@ -1,4 +1,6 @@
 #include "common/PbrLighting.hlsli"
+#include "common/Environment.hlsli"
+#include "common/FrameContract.hlsli"
 
 static const uint FLAG_VERTEX_COLOR = 1u << 0u;
 static const uint FLAG_BASE_COLOR_TEXTURE = 1u << 1u;
@@ -41,6 +43,11 @@ struct VertexOutput
     float2 uv0 : TEXCOORD0;
     float2 uv1 : TEXCOORD1;
     float4 color : COLOR0;
+    // Campaign F temporal outputs: unjittered current/previous clip positions for jitter-free
+    // motion vectors and positive linear view depth. PSMain ignores them; PSMainGBuffer uses them.
+    float4 current_clip : TEXCOORD2;
+    float4 previous_clip : TEXCOORD3;
+    float view_depth : TEXCOORD4;
 };
 
 struct GpuLight
@@ -92,6 +99,18 @@ cbuffer LightConstants : register(b2)
     GpuLight lights[32];
 };
 
+// Campaign D/F per-draw temporal block (src/rendering/TemporalContract.h RasterTemporalDrawConstants).
+cbuffer TemporalDrawConstants : register(b3)
+{
+    column_major float4x4 previous_world;
+    uint instance_id;
+    uint material_table_index;
+    uint temporal_flags;
+    uint temporal_padding0;
+};
+
+ConstantBuffer<ViewConstantsData> g_view : register(b4);
+
 Texture2D<float4> base_color_texture : register(t0);
 Texture2D<float4> metallic_roughness_texture : register(t1);
 Texture2D<float4> normal_texture : register(t2);
@@ -123,49 +142,6 @@ float3 material_id_color(uint identifier)
         0.2 + 0.8 * float((hash >> 16u) & 255u) / 255.0);
 }
 
-
-float3 procedural_environment_radiance(float3 direction)
-{
-    const float3 d = normalize(direction);
-    const float sky_t = saturate(d.y * 0.5 + 0.5);
-    const float3 ground = float3(0.035, 0.028, 0.022);
-    const float3 horizon = float3(0.26, 0.31, 0.38);
-    const float3 zenith = float3(0.08, 0.18, 0.42);
-    float3 environment = d.y >= 0.0 ? lerp(horizon, zenith, pow(sky_t, 0.65))
-                                     : lerp(ground, horizon * 0.24, sky_t * 2.0);
-    const float3 sun_direction = normalize(float3(-0.35, 0.82, 0.45));
-    const float sun = pow(max(dot(d, sun_direction), 0.0), 512.0) * 18.0;
-    return environment + float3(1.0, 0.82, 0.58) * sun;
-}
-
-float3 procedural_diffuse_irradiance(float3 normal)
-{
-    const float hemi = saturate(normalize(normal).y * 0.5 + 0.5);
-    return lerp(float3(0.075, 0.060, 0.050), float3(0.34, 0.47, 0.72), hemi) * DAEDALUS_PI;
-}
-
-float3 procedural_prefiltered_specular(float3 reflection, float roughness)
-{
-    const float3 sharp = procedural_environment_radiance(reflection);
-    const float3 average = float3(0.15, 0.19, 0.27);
-    const float r = saturate(roughness);
-    const float blur = r * r * (3.0 - 2.0 * r);
-    return lerp(sharp, average, blur);
-}
-
-float2 environment_brdf_approximation(float n_dot_v, float roughness)
-{
-    const float4 c0 = float4(-1.0, -0.0275, -0.572, 0.022);
-    const float4 c1 = float4(1.0, 0.0425, 1.04, -0.04);
-    const float4 r = saturate(roughness) * c0 + c1;
-    const float a004 = min(r.x * r.x, exp2(-9.28 * saturate(n_dot_v))) * r.x + r.y;
-    return float2(-1.04, 1.04) * a004 + r.zw;
-}
-
-float3 fresnel_schlick_roughness(float3 f0, float n_dot_v, float roughness)
-{
-    return f0 + (max((1.0 - roughness).xxx, f0) - f0) * pow(saturate(1.0 - n_dot_v), 5.0);
-}
 
 float shadow_visibility(float3 world_position, float3 shading_normal, float3 light_direction)
 {
@@ -206,11 +182,36 @@ VertexOutput VSMain(VertexInput input)
     output.uv0 = input.uv0;
     output.uv1 = input.uv1;
     output.color = input.color;
+    const float4 previous_world_position4 = mul(previous_world, float4(input.position, 1.0));
+    output.current_clip = mul(g_view.view_projection_unjittered, world_position4);
+    output.previous_clip = mul(g_view.previous_view_projection_unjittered, previous_world_position4);
+    output.view_depth = -mul(g_view.view, world_position4).z;
     return output;
 }
 
-float4 PSMain(VertexOutput input, bool is_front_face : SV_IsFrontFace) : SV_Target0
+struct GeometrySurface
 {
+    float3 shading_normal;
+    float3 geometric_normal;
+    float3 base_color;
+    float metallic;
+    float roughness;
+    float ambient_occlusion;
+};
+
+// Shared C2 shading body. With defer_direct/defer_specular false it is the unchanged Campaign C2
+// forward shading. In hybrid mode, eligible OPAQUE/MASK pixels omit punctual direct lighting
+// (re-evaluated with ray-traced visibility) and, for roughness <= reflection_max_roughness, the IBL
+// specular term (replaced by ray-traced reflections); both predicates are reproduced exactly by
+// the DXR ray-generation shader from the G-buffer values written below.
+float4 shade_pixel(VertexOutput input, bool is_front_face, bool defer_direct, bool defer_specular, out GeometrySurface surface)
+{
+    surface.shading_normal = float3(0.0, 0.0, 1.0);
+    surface.geometric_normal = float3(0.0, 0.0, 1.0);
+    surface.base_color = 0.0;
+    surface.metallic = 0.0;
+    surface.roughness = 1.0;
+    surface.ambient_occlusion = 1.0;
     if ((flags & FLAG_BOUNDS_OVERLAY) != 0u)
         return float4(1.0, 0.8, 0.1, 1.0);
 
@@ -279,6 +280,13 @@ float4 PSMain(VertexOutput input, bool is_front_face : SV_IsFrontFace) : SV_Targ
         }
     }
 
+    surface.shading_normal = shading_normal;
+    surface.geometric_normal = geometric_normal;
+    surface.base_color = max(base_color.rgb, 0.0);
+    surface.metallic = metallic;
+    surface.roughness = roughness;
+    surface.ambient_occlusion = ambient_occlusion;
+
     if (diagnostic_mode == DIAGNOSTIC_NORMALS)
         return float4(shading_normal * 0.5 + 0.5, 1.0);
     if (diagnostic_mode == DIAGNOSTIC_UV)
@@ -304,8 +312,9 @@ float4 PSMain(VertexOutput input, bool is_front_face : SV_IsFrontFace) : SV_Targ
     const float3 view_direction = view_length_squared > 1.0e-20 ? view_delta * rsqrt(view_length_squared) : shading_normal;
     float3 direct = 0.0;
 
+    const uint shaded_light_count = defer_direct ? 0u : min(light_count, 32u);
     [loop]
-    for (uint index = 0u; index < min(light_count, 32u); ++index)
+    for (uint index = 0u; index < shaded_light_count; ++index)
     {
         const GpuLight light = lights[index];
         float3 light_direction = 0.0;
@@ -349,11 +358,61 @@ float4 PSMain(VertexOutput input, bool is_front_face : SV_IsFrontFace) : SV_Targ
     const float3 reflection = reflect(-view_direction, shading_normal);
     const float3 prefiltered = procedural_prefiltered_specular(reflection, roughness);
     const float2 brdf = environment_brdf_approximation(n_dot_v, roughness);
-    const float3 specular_ibl = prefiltered * (f0 * brdf.x + brdf.y);
+    const bool specular_ray_traced = defer_specular && roughness <= g_view.reflection_max_roughness;
+    const float3 specular_ibl = specular_ray_traced ? 0.0.xxx : prefiltered * (f0 * brdf.x + brdf.y);
     const float3 indirect = (diffuse_ibl + specular_ibl) * ambient_occlusion * max(environment_shadow.x, 0.0);
     const float3 hdr_color = direct + indirect + emissive;
     const float output_alpha = alpha_mode == 2u ? saturate(base_color.a) : 1.0;
     // Validation intentionally preserves NaN/Inf in the HDR target. ToneMap.hlsl makes
     // non-finite presentation conspicuous, while --validate-hdr performs the authoritative readback scan.
     return float4(hdr_color, output_alpha);
+}
+
+float4 PSMain(VertexOutput input, bool is_front_face : SV_IsFrontFace) : SV_Target0
+{
+    GeometrySurface surface;
+    return shade_pixel(input, is_front_face, false, false, surface);
+}
+
+struct GBufferOutput
+{
+    float4 color : SV_Target0;
+    float4 normal_roughness : SV_Target1;
+    float4 albedo_metallic : SV_Target2;
+    float4 position_depth : SV_Target3;
+    float4 motion : SV_Target4;
+    uint4 identifiers : SV_Target5;
+};
+
+// OPAQUE/MASK G-buffer variant (hybrid primary surface, temporal inputs, upscaler inputs).
+GBufferOutput PSMainGBuffer(VertexOutput input, bool is_front_face : SV_IsFrontFace)
+{
+    const bool eligible = (temporal_flags & TEMPORAL_DRAW_FLAG_HYBRID_ELIGIBLE) != 0u;
+    const bool defer_direct = eligible && (g_view.hybrid_flags & HYBRID_FLAG_RT_SHADOWS) != 0u;
+    const bool defer_specular = eligible && (g_view.hybrid_flags & HYBRID_FLAG_RT_REFLECTIONS) != 0u;
+    // True facet normal from screen-space position derivatives (computed before any discard),
+    // oriented toward the camera. Used for robust ray-origin offsets and denoiser plane tests.
+    float3 facet_normal = cross(ddy(input.world_position), ddx(input.world_position));
+    const float facet_length_squared = dot(facet_normal, facet_normal);
+    facet_normal = facet_length_squared > 1.0e-30 ? facet_normal * rsqrt(facet_length_squared) : float3(0.0, 0.0, 1.0);
+    if (dot(facet_normal, camera_position.xyz - input.world_position) < 0.0)
+        facet_normal = -facet_normal;
+    GeometrySurface surface;
+    GBufferOutput output;
+    output.color = shade_pixel(input, is_front_face, defer_direct, defer_specular, surface);
+    output.normal_roughness = float4(surface.shading_normal, surface.roughness);
+    output.albedo_metallic = float4(surface.base_color, surface.metallic);
+    output.position_depth = float4(input.world_position, max(input.view_depth, 1.0e-6));
+    const float2 current_pixel = clip_to_pixel(input.current_clip, g_view.render_size.xy);
+    const float2 previous_pixel = clip_to_pixel(input.previous_clip, g_view.render_size.xy);
+    // Previous clip w of the unjittered projection is the point's previous linear view depth.
+    output.motion = float4(previous_pixel - current_pixel, max(input.previous_clip.w, 1.0e-6), 1.0);
+    uint surface_flags = eligible ? GBUFFER_FLAG_HYBRID_ELIGIBLE : 0u;
+    if ((flags & FLAG_DOUBLE_SIDED) != 0u)
+        surface_flags |= GBUFFER_FLAG_DOUBLE_SIDED;
+    output.identifiers = uint4(instance_id + 1u,
+                               material_table_index + 1u,
+                               encode_octahedral_normal(facet_normal),
+                               (f32tof16(saturate(surface.ambient_occlusion)) & 0xffffu) | (surface_flags << 16u));
+    return output;
 }

@@ -69,11 +69,30 @@ Mat4 OrbitCamera::view_matrix() const noexcept
     return look_at_rh(eye(), target_, {0.0F, 1.0F, 0.0F});
 }
 
+void OrbitCamera::orbit_by(float yaw_radians, float pitch_radians) noexcept
+{
+    yaw_ += yaw_radians;
+    pitch_ = std::clamp(pitch_ + pitch_radians, -kPi * 0.49F, kPi * 0.49F);
+}
+
+float OrbitCamera::near_plane() const noexcept
+{
+    return std::max(radius_ * 0.001F, 0.001F);
+}
+
+float OrbitCamera::far_plane() const noexcept
+{
+    return std::max(radius_ * 100.0F, near_plane() + 1.0F);
+}
+
+float OrbitCamera::vertical_fov_radians() const noexcept
+{
+    return 50.0F * (kPi / 180.0F);
+}
+
 Mat4 OrbitCamera::projection_matrix(float aspect) const noexcept
 {
-    const float near_plane = std::max(radius_ * 0.001F, 0.001F);
-    const float far_plane = std::max(radius_ * 100.0F, near_plane + 1.0F);
-    return perspective_rh(50.0F * (kPi / 180.0F), aspect, near_plane, far_plane);
+    return perspective_rh(vertical_fov_radians(), aspect, near_plane(), far_plane());
 }
 
 Mat4 OrbitCamera::view_projection_matrix(float aspect) const noexcept

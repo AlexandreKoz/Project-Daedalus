@@ -1,11 +1,12 @@
 #include "Application.h"
 
-#include "assets/GltfImporter.h"
+#include "assets/AssetLoader.h"
+#include "assets/FloatImage.h"
 #include "assets/ImageEncoder.h"
 #include "core/Log.h"
 #include "core/Version.h"
 #include "graphics/D3D12Context.h"
-#include "graphics/PbrSceneRenderer.h"
+#include "graphics/SceneRenderer.h"
 #include "platform/Win32Window.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -18,6 +19,7 @@
 #include <objbase.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -111,16 +113,17 @@ void write_capture_metadata(const std::filesystem::path& path,
                             const CommandLineOptions& options,
                             const CanonicalScene& scene,
                             const D3D12Context& graphics,
-                            const RendererCameraState& camera,
+                            const SceneRenderer& renderer,
                             const RendererCaptureResult& capture,
                             std::uint64_t frame_number)
 {
+    const RendererCameraState camera = renderer.camera_state();
     std::string selected_scene = "";
     if (scene.selected_scene.valid() && scene.selected_scene.value() < scene.scenes.size())
         selected_scene = scene.scenes[scene.selected_scene.value()].name;
     std::ostringstream stream;
     stream << "{\n"
-           << "  \"schema\": \"daedalus.capture-metadata/1\",\n"
+           << "  \"schema\": \"daedalus.capture-metadata/2\",\n"
            << "  \"project_version\": \"" << json_escape(std::string(kVersion)) << "\",\n"
            << "  \"build_configuration\": \"" << json_escape(DAEDALUS_BUILD_TYPE) << "\",\n"
            << "  \"source_asset\": \"" << json_escape(scene.source.display_name) << "\",\n"
@@ -131,7 +134,7 @@ void write_capture_metadata(const std::filesystem::path& path,
            << "  \"width\": " << capture.width << ",\n"
            << "  \"height\": " << capture.height << ",\n"
            << "  \"frame\": " << frame_number << ",\n"
-           << "  \"exposure_ev\": " << options.exposure_ev << ",\n"
+           << "  \"exposure_ev\": " << renderer.exposure_ev() << ",\n"
            << "  \"tone_map\": \"ACES-fitted\",\n"
            << "  \"environment\": \"daedalus-procedural-sky-v1\",\n"
            << "  \"environment_intensity\": " << options.environment_intensity << ",\n"
@@ -151,7 +154,14 @@ void write_capture_metadata(const std::filesystem::path& path,
            << "  \"feature_level\": \"" << json_escape(graphics.feature_level_name()) << "\",\n"
            << "  \"debug_layer\": " << (graphics.debug_layer_enabled() ? "true" : "false") << ",\n"
            << "  \"hdr_nan_count\": " << capture.hdr_nan_count << ",\n"
-           << "  \"hdr_infinity_count\": " << capture.hdr_infinity_count << "\n"
+           << "  \"hdr_infinity_count\": " << capture.hdr_infinity_count << ",\n"
+           << "  \"linear_capture\": {\"width\": " << capture.linear_width << ", \"height\": " << capture.linear_height
+           << ", \"format\": \"" << json_escape(capture.linear_format) << "\", \"pfm\": "
+           << (options.capture_hdr_path.has_value() ? "\"" + json_escape(options.capture_hdr_path->generic_string()) + "\"" : std::string("null"))
+           << "},\n"
+           << "  \"path_trace_accumulated_samples\": " << renderer.accumulated_samples() << ",\n"
+           << "  \"path_trace_reference_certifiable\": " << (renderer.path_trace_reference_certifiable() ? "true" : "false") << ",\n"
+           << "  \"renderer\": " << renderer.status_json() << "\n"
            << "}\n";
     write_text_file(path, stream.str());
 }
@@ -160,6 +170,7 @@ void write_benchmark_report(const std::filesystem::path& path,
                             const CommandLineOptions& options,
                             const CanonicalScene& scene,
                             const D3D12Context& graphics,
+                            const SceneRenderer& renderer,
                             std::span<const double> cpu_frame_ms,
                             std::span<const GpuPassTimings> gpu_samples,
                             const RendererResourceStats& resources,
@@ -181,6 +192,7 @@ void write_benchmark_report(const std::filesystem::path& path,
     double gpu_transparent = 0.0;
     double gpu_tone = 0.0;
     double gpu_total = 0.0;
+    std::array<double, static_cast<std::size_t>(GpuPass::count)> gpu_pass_sums{};
     for (const GpuPassTimings& sample : gpu_samples)
     {
         gpu_shadow += sample.shadow_ms;
@@ -188,6 +200,7 @@ void write_benchmark_report(const std::filesystem::path& path,
         gpu_transparent += sample.transparent_ms;
         gpu_tone += sample.tone_map_ms;
         gpu_total += sample.total_ms;
+        for (std::size_t pass = 0; pass < gpu_pass_sums.size(); ++pass) gpu_pass_sums[pass] += sample.pass_ms[pass];
     }
     const double gpu_divisor = gpu_samples.empty() ? 1.0 : static_cast<double>(gpu_samples.size());
     std::string selected_scene;
@@ -196,7 +209,7 @@ void write_benchmark_report(const std::filesystem::path& path,
 
     std::ostringstream stream;
     stream << "{\n"
-           << "  \"schema\": \"daedalus.campaign-c-benchmark/1\",\n"
+           << "  \"schema\": \"daedalus.benchmark/2\",\n"
            << "  \"project_version\": \"" << json_escape(std::string(kVersion)) << "\",\n"
            << "  \"build_configuration\": \"" << json_escape(DAEDALUS_BUILD_TYPE) << "\",\n"
            << "  \"source_asset\": \"" << json_escape(scene.source.display_name) << "\",\n"
@@ -217,6 +230,10 @@ void write_benchmark_report(const std::filesystem::path& path,
            << "  \"gpu_transparent_ms_mean\": " << (gpu_transparent / gpu_divisor) << ",\n"
            << "  \"gpu_tone_map_ms_mean\": " << (gpu_tone / gpu_divisor) << ",\n"
            << "  \"gpu_total_ms_mean\": " << (gpu_total / gpu_divisor) << ",\n"
+           << "  \"gpu_pass_ms_mean\": {";
+    for (std::size_t pass = 0; pass < gpu_pass_sums.size(); ++pass)
+        stream << (pass == 0U ? "" : ", ") << '"' << to_string(static_cast<GpuPass>(pass)) << "\": " << (gpu_pass_sums[pass] / gpu_divisor);
+    stream << "},\n"
            << "  \"adapter\": \"" << json_escape(graphics.adapter_name()) << "\",\n"
            << "  \"warp\": " << (graphics.using_warp() ? "true" : "false") << ",\n"
            << "  \"dedicated_vram_bytes\": " << graphics.dedicated_video_memory() << ",\n"
@@ -235,9 +252,15 @@ void write_benchmark_report(const std::filesystem::path& path,
            << "    \"descriptors\": " << resources.descriptor_count << ",\n"
            << "    \"logical_geometry_bytes\": " << resources.logical_geometry_bytes << ",\n"
            << "    \"canonical_retained_bytes\": " << resources.canonical_retained_bytes << ",\n"
-           << "    \"committed_allocation_estimate_bytes\": " << resources.committed_allocation_bytes << "\n"
+           << "    \"committed_allocation_estimate_bytes\": " << resources.committed_allocation_bytes << ",\n"
+           << "    \"ray_tracing_allocation_estimate_bytes\": " << resources.ray_tracing_allocation_bytes << ",\n"
+           << "    \"temporal_allocation_estimate_bytes\": " << resources.temporal_allocation_bytes << ",\n"
+           << "    \"blas_count\": " << resources.blas_count << ",\n"
+           << "    \"blas_bytes\": " << resources.blas_bytes << ",\n"
+           << "    \"tlas_bytes\": " << resources.tlas_bytes << "\n"
            << "  },\n"
-           << "  \"exposure_ev\": " << options.exposure_ev << ",\n"
+           << "  \"renderer\": " << renderer.status_json() << ",\n"
+           << "  \"exposure_ev\": " << renderer.exposure_ev() << ",\n"
            << "  \"environment_intensity\": " << options.environment_intensity << ",\n"
            << "  \"shadows_enabled\": " << (options.shadows_enabled ? "true" : "false") << ",\n"
            << "  \"shadow_constant_bias\": " << options.shadow_constant_bias << ",\n"
@@ -325,6 +348,11 @@ int Application::run()
         {
             reload_scene();
         }
+        const RendererKeyCommands commands = window_->consume_renderer_commands();
+        if (commands.mode.has_value()) renderer_->request_mode(*commands.mode);
+        if (commands.toggle_denoiser) renderer_->toggle_denoiser();
+        if (commands.exposure_delta != 0.0F) renderer_->adjust_exposure(commands.exposure_delta);
+        if (commands.reset_history) renderer_->request_history_reset();
         renderer_->apply_input(window_->consume_orbit_input());
 
         if (window_->minimized())
@@ -333,11 +361,17 @@ int Application::run()
             continue;
         }
 
+        // Recreation (mode switches) and per-frame scripted state happen before the frame's command
+        // list is opened; capture decisions use the prepared sample count for fixed-sample captures.
+        renderer_->prepare_frame();
         const std::uint64_t next_frame_number = presented_frames + 1U;
-        const bool capture_this_frame = !capture_completed && next_frame_number == capture_frame &&
-            (options_.capture_path.has_value() || options_.validate_hdr);
+        const bool capture_due = options_.capture_samples.has_value()
+            ? renderer_->samples_after_prepared_frame() == *options_.capture_samples
+            : next_frame_number == capture_frame;
+        const bool capture_this_frame = !capture_completed && capture_requested(options_) && capture_due;
         if (capture_this_frame)
-            renderer_->request_validation_capture(options_.capture_path.has_value(), options_.validate_hdr);
+            renderer_->request_validation_capture(options_.capture_path.has_value(),
+                                                  options_.validate_hdr || options_.capture_hdr_path.has_value());
 
         const FrameRecordingContext frame = graphics_->begin_frame();
         renderer_->record(frame);
@@ -346,26 +380,7 @@ int Application::run()
 
         if (capture_this_frame)
         {
-            graphics_->wait_for_gpu();
-            const RendererCaptureResult capture = renderer_->finalize_validation_capture();
-            if (options_.capture_path.has_value())
-            {
-                encode_png_rgba8(*options_.capture_path, capture.width, capture.height, capture.rgba8);
-                Log::info("Wrote deterministic capture to " + options_.capture_path->string());
-            }
-            std::optional<std::filesystem::path> metadata_path = options_.capture_metadata_path;
-            if (!metadata_path.has_value() && options_.capture_path.has_value())
-                metadata_path = std::filesystem::path(options_.capture_path->string() + ".json");
-            if (metadata_path.has_value())
-            {
-                write_capture_metadata(*metadata_path, options_, scene_, *graphics_,
-                                       renderer_->camera_state(), capture, presented_frames);
-                Log::info("Wrote capture metadata to " + metadata_path->string());
-            }
-            if (options_.validate_hdr && (capture.hdr_nan_count != 0U || capture.hdr_infinity_count != 0U))
-                throw std::runtime_error("HDR validation failed: NaN/Inf values were detected in scene colour");
-            if (options_.validate_hdr)
-                Log::info("HDR validation PASS: zero NaN/Inf components in captured scene colour");
+            complete_capture(presented_frames);
             capture_completed = true;
         }
 
@@ -390,14 +405,16 @@ int Application::run()
         throw std::runtime_error("runtime stress ended before all requested scene reloads completed");
     if (options_.stress_resize && !stress_resize_completed_)
         throw std::runtime_error("runtime stress ended before the resize-state sequence completed");
-    if ((options_.capture_path.has_value() || options_.validate_hdr) && !capture_completed)
-        throw std::runtime_error("application ended before the requested validation capture frame");
+    if (capture_requested(options_) && !capture_completed)
+        throw std::runtime_error(options_.capture_samples.has_value()
+                                     ? "application ended before the requested path-tracing sample count was captured"
+                                     : "application ended before the requested validation capture frame");
 
     graphics_->wait_for_gpu();
     if (options_.benchmark_output_path.has_value())
     {
         const RendererResourceStats resources = renderer_->resource_stats();
-        write_benchmark_report(*options_.benchmark_output_path, options_, scene_, *graphics_,
+        write_benchmark_report(*options_.benchmark_output_path, options_, scene_, *graphics_, *renderer_,
                                benchmark_cpu_frame_ms, benchmark_gpu_samples, resources, presented_frames);
         Log::info("Wrote benchmark report to " + options_.benchmark_output_path->string());
     }
@@ -408,13 +425,49 @@ int Application::run()
     return EXIT_SUCCESS;
 }
 
+void Application::complete_capture(std::uint64_t presented_frames)
+{
+    graphics_->wait_for_gpu();
+    const RendererCaptureResult capture = renderer_->finalize_validation_capture();
+    if (options_.capture_path.has_value())
+    {
+        encode_png_rgba8(*options_.capture_path, capture.width, capture.height, capture.rgba8);
+        Log::info("Wrote deterministic capture to " + options_.capture_path->string());
+    }
+    if (options_.capture_hdr_path.has_value())
+    {
+        FloatImageRgb image;
+        image.width = capture.linear_width;
+        image.height = capture.linear_height;
+        image.rgb = capture.linear_rgb;
+        write_pfm(*options_.capture_hdr_path, image);
+        Log::info("Wrote linear float32 capture (" + capture.linear_format + ") to " + options_.capture_hdr_path->string());
+    }
+    std::optional<std::filesystem::path> metadata_path = options_.capture_metadata_path;
+    if (!metadata_path.has_value() && options_.capture_path.has_value())
+        metadata_path = std::filesystem::path(options_.capture_path->string() + ".json");
+    if (!metadata_path.has_value() && options_.capture_hdr_path.has_value())
+        metadata_path = std::filesystem::path(options_.capture_hdr_path->string() + ".json");
+    if (metadata_path.has_value())
+    {
+        write_capture_metadata(*metadata_path, options_, scene_, *graphics_, *renderer_, capture, presented_frames);
+        Log::info("Wrote capture metadata to " + metadata_path->string());
+    }
+    if (options_.validate_hdr && (capture.hdr_nan_count != 0U || capture.hdr_infinity_count != 0U))
+        throw std::runtime_error("HDR validation failed: NaN/Inf values were detected in the pre-tone-map linear signal");
+    if (options_.validate_hdr)
+        Log::info("HDR scan: zero NaN/Inf components in the captured pre-tone-map signal (" + capture.linear_format + ")");
+}
+
 void Application::load_scene()
 {
-    if (!options_.asset_path.has_value())
+    if (options_.builtin_scene.has_value() || !options_.asset_path.has_value())
     {
-        scene_ = make_builtin_triangle_scene();
-        import_report_ = make_import_report(scene_, ImportStatus::success, {}, "builtin-canonical-scene");
-        Log::info("No --asset was supplied; using the canonical built-in triangle");
+        const std::string name = options_.builtin_scene.value_or("triangle");
+        scene_ = make_builtin_scene(name);
+        import_report_ = make_import_report(scene_, ImportStatus::success, {}, "builtin-canonical-scene:" + name);
+        Log::info(options_.builtin_scene.has_value() ? "Using built-in validation scene '" + name + "'"
+                                                     : std::string("No --asset was supplied; using the canonical built-in triangle"));
         if (options_.dump_scene)
         {
             const std::string hierarchy = dump_scene_hierarchy(scene_);
@@ -425,17 +478,25 @@ void Application::load_scene()
         return;
     }
 
-    ImportSettings settings;
-    settings.scene_selector = options_.scene_selector;
-    ImportResult result = GltfImporter{}.import_file(*options_.asset_path, settings);
-    import_report_ = result.report;
+    AssetLoadOptions load;
+    load.source = *options_.asset_path;
+    load.import_settings.scene_selector = options_.scene_selector;
+    load.cache_directory = options_.asset_cache_directory;
+    load.texture_search_roots = options_.texture_search_roots;
+    load.blender_executable = options_.blender_executable;
+    load.blender_timeout_seconds = options_.blender_timeout_seconds;
+    load.blender_script = executable_directory_ / "scripts" / "blender" / "daedalus_blend_export.py";
+    load.temporary_directory = executable_directory_ / "runtime" / "conversion";
+    AssetLoadResult result = load_asset(load);
+    import_report_ = result.import.report;
     log_import_report(import_report_);
-    if (!result.succeeded())
+    for (const std::string& note : result.notes) Log::info(note);
+    if (!result.import.succeeded())
     {
         write_import_report();
         throw std::runtime_error("asset import failed with status " + std::string(to_string(import_report_.status)));
     }
-    scene_ = std::move(result.scene);
+    scene_ = std::move(result.import.scene);
 
     if (options_.dump_scene)
     {
@@ -448,12 +509,7 @@ void Application::load_scene()
 
 void Application::create_renderer()
 {
-    renderer_ = std::make_unique<PbrSceneRenderer>(
-        *graphics_, scene_, options_.diagnostic_mode, options_.exposure_ev, options_.environment_intensity,
-        options_.shadows_enabled, options_.shadow_constant_bias, options_.shadow_normal_bias,
-        shader_directory_ / "RasterPbrVS.dxil", shader_directory_ / "RasterPbrPS.dxil",
-        shader_directory_ / "ToneMapVS.dxil", shader_directory_ / "ToneMapPS.dxil",
-        shader_directory_ / "ShadowVS.dxil", shader_directory_ / "ShadowPS.dxil");
+    renderer_ = std::make_unique<SceneRenderer>(*graphics_, scene_, options_, shader_directory_, executable_directory_);
 }
 
 void Application::reload_scene()
@@ -503,6 +559,7 @@ void Application::initialize()
     constexpr std::uint32_t initial_width = 1280;
     constexpr std::uint32_t initial_height = 720;
     const std::filesystem::path executable_dir = executable_directory();
+    executable_directory_ = executable_dir;
     const std::filesystem::path runtime_dir = executable_dir / "runtime";
     Log::initialize(runtime_dir / "log" / "Daedalus.log");
 
@@ -513,6 +570,8 @@ void Application::initialize()
     Log::info("Exposure EV: " + std::to_string(options_.exposure_ev));
     Log::info("Environment intensity: " + std::to_string(options_.environment_intensity));
     Log::info(std::string("Shadows enabled: ") + (options_.shadows_enabled ? "yes" : "no"));
+    Log::info("Requested renderer mode: " + std::string(to_string(options_.renderer.mode)) +
+              " | upscaler: " + std::string(to_string(options_.renderer.upscaler.mode)));
 
     const HRESULT com_result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(com_result)) throw std::runtime_error("CoInitializeEx failed for Windows graphics services");
@@ -524,7 +583,7 @@ void Application::initialize()
     dimensions << "Initial client dimensions: " << initial_width << 'x' << initial_height;
     Log::info(dimensions.str());
 
-    window_ = std::make_unique<Win32Window>(L"Project Daedalus - Campaign C2 Raster PBR Viewer", initial_width, initial_height);
+    window_ = std::make_unique<Win32Window>(L"Project Daedalus - Raster / Hybrid DXR / Path Tracing Viewer", initial_width, initial_height);
     graphics_ = std::make_unique<D3D12Context>(
         window_->native_handle(), window_->client_width(), window_->client_height(), options_.use_warp);
 

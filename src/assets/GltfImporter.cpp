@@ -1682,7 +1682,8 @@ std::string ImportSettings::deterministic_description() const
            << ";max_total=" << maximum_total_decoded_bytes
            << ";max_peak=" << maximum_peak_bytes
            << ";reject_path_traversal=" << (reject_path_traversal ? "true" : "false")
-           << ";sparse_accessors=false;primitive_modes=triangles;images=png,jpeg";
+           << ";sparse_accessors=false;primitive_modes=triangles;images=png,jpeg"
+           << ";material_extensions=emissive_strength,transmission,ior,volume(factors)";
     return output.str();
 }
 
@@ -1724,11 +1725,16 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
         scene.source.copyright = optional_string(*asset, "copyright", "json.asset");
         scene.source.extensions_used = parse_string_array(root, "extensionsUsed", "json");
         scene.source.extensions_required = parse_string_array(root, "extensionsRequired", "json");
-        const std::set<std::string> supported_extensions{"KHR_lights_punctual", "KHR_mesh_quantization"};
+        // Campaign E adds a conservative, factor-only subset of the PBR material extensions; their
+        // texture properties are reported as ignored rather than silently dropped.
+        const std::set<std::string> supported_extensions{"KHR_lights_punctual", "KHR_mesh_quantization",
+                                                         "KHR_materials_emissive_strength", "KHR_materials_transmission",
+                                                         "KHR_materials_ior", "KHR_materials_volume"};
         for (const std::string& extension : scene.source.extensions_required)
             if (!supported_extensions.contains(extension))
                 fail(ImportStatus::unsupported_feature, DiagnosticCode::unsupported_required_extension,
-                     "json.extensionsRequired", "required extension is unsupported", "KHR_lights_punctual or KHR_mesh_quantization", extension);
+                     "json.extensionsRequired", "required extension is unsupported",
+                     "KHR_lights_punctual, KHR_mesh_quantization, or a supported KHR_materials_* factor extension", extension);
         for (const std::string& extension : scene.source.extensions_used)
             if (!supported_extensions.contains(extension))
                 add_warning(diagnostics, DiagnosticCode::unsupported_optional_extension, DiagnosticDisposition::ignored,
@@ -1991,6 +1997,61 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
                 else fail(ImportStatus::invalid_source, DiagnosticCode::invalid_reference, location + ".alphaMode", "invalid alpha mode", "OPAQUE, MASK, or BLEND", alpha);
                 if (const auto iterator = object.find("alphaCutoff"); iterator != object.end()) material.alpha_cutoff = number_to_float(iterator->second, location + ".alphaCutoff");
                 material.double_sided = optional_bool(object, "doubleSided", false, location);
+                if (const JsonValue::Object* material_extensions = optional_object(object, "extensions", location); material_extensions != nullptr)
+                {
+                    const std::string extension_location = location + ".extensions";
+                    auto ignore_texture = [&](const JsonValue::Object& extension, std::string_view extension_name, std::string_view key)
+                    {
+                        if (extension.find(key) != extension.end())
+                            add_warning(diagnostics, DiagnosticCode::unsupported_optional_extension, DiagnosticDisposition::ignored,
+                                        extension_location + "." + std::string(extension_name) + "." + std::string(key),
+                                        "extension texture is not supported; only the scalar/colour factor is imported");
+                    };
+                    if (const JsonValue::Object* strength = optional_object(*material_extensions, "KHR_materials_emissive_strength", extension_location); strength != nullptr)
+                    {
+                        if (const auto iterator = strength->find("emissiveStrength"); iterator != strength->end())
+                            material.emissive_strength = number_to_float(iterator->second, extension_location + ".KHR_materials_emissive_strength.emissiveStrength");
+                        if (!(material.emissive_strength >= 0.0F))
+                            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_reference, extension_location + ".KHR_materials_emissive_strength",
+                                 "emissiveStrength must be non-negative");
+                    }
+                    if (const JsonValue::Object* transmission = optional_object(*material_extensions, "KHR_materials_transmission", extension_location); transmission != nullptr)
+                    {
+                        if (const auto iterator = transmission->find("transmissionFactor"); iterator != transmission->end())
+                            material.transmission_factor = number_to_float(iterator->second, extension_location + ".KHR_materials_transmission.transmissionFactor");
+                        if (!in_unit_interval(material.transmission_factor))
+                            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_reference, extension_location + ".KHR_materials_transmission",
+                                 "transmissionFactor must be in [0, 1]");
+                        ignore_texture(*transmission, "KHR_materials_transmission", "transmissionTexture");
+                    }
+                    if (const JsonValue::Object* ior = optional_object(*material_extensions, "KHR_materials_ior", extension_location); ior != nullptr)
+                    {
+                        if (const auto iterator = ior->find("ior"); iterator != ior->end())
+                            material.ior = number_to_float(iterator->second, extension_location + ".KHR_materials_ior.ior");
+                        if (!(material.ior >= 1.0F) && material.ior != 0.0F)
+                            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_reference, extension_location + ".KHR_materials_ior",
+                                 "ior must be >= 1 (or 0 for the specification's legacy sentinel)");
+                        if (material.ior == 0.0F)
+                        {
+                            material.ior = 1.5F;
+                            add_warning(diagnostics, DiagnosticCode::material_approximated, DiagnosticDisposition::defaulted,
+                                        extension_location + ".KHR_materials_ior", "ior 0 is not supported by the path tracer; 1.5 was used");
+                        }
+                    }
+                    if (const JsonValue::Object* volume = optional_object(*material_extensions, "KHR_materials_volume", extension_location); volume != nullptr)
+                    {
+                        if (const auto iterator = volume->find("thicknessFactor"); iterator != volume->end())
+                            material.thickness_factor = number_to_float(iterator->second, extension_location + ".KHR_materials_volume.thicknessFactor");
+                        if (const auto iterator = volume->find("attenuationDistance"); iterator != volume->end())
+                            material.attenuation_distance = number_to_float(iterator->second, extension_location + ".KHR_materials_volume.attenuationDistance");
+                        if (const auto iterator = volume->find("attenuationColor"); iterator != volume->end())
+                            material.attenuation_color = read_vec3(iterator->second, extension_location + ".KHR_materials_volume.attenuationColor");
+                        if (material.thickness_factor < 0.0F || material.attenuation_distance < 0.0F)
+                            fail(ImportStatus::invalid_source, DiagnosticCode::invalid_reference, extension_location + ".KHR_materials_volume",
+                                 "thicknessFactor and attenuationDistance must be non-negative");
+                        ignore_texture(*volume, "KHR_materials_volume", "thicknessTexture");
+                    }
+                }
                 if (!finite(material.base_color_factor) || !finite(material.emissive_factor) ||
                     !std::isfinite(material.metallic_factor) || !std::isfinite(material.roughness_factor) ||
                     !std::isfinite(material.normal_scale) || !std::isfinite(material.occlusion_strength) ||
@@ -2523,7 +2584,9 @@ ImportResult GltfImporter::import_file(const std::filesystem::path& source, cons
     ImportReport report = make_import_report(scene, final_status, std::move(diagnostics), settings_description);
     for (const std::string& extension : scene.source.extensions_used)
     {
-        if (extension == "KHR_lights_punctual" || extension == "KHR_mesh_quantization") continue;
+        if (extension == "KHR_lights_punctual" || extension == "KHR_mesh_quantization" ||
+            extension == "KHR_materials_emissive_strength" || extension == "KHR_materials_transmission" ||
+            extension == "KHR_materials_ior" || extension == "KHR_materials_volume") continue;
         if (std::find(scene.source.extensions_required.begin(), scene.source.extensions_required.end(), extension) != scene.source.extensions_required.end())
             report.extensions_rejected.push_back(extension);
         else report.extensions_ignored.push_back(extension);

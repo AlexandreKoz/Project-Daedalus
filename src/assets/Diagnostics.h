@@ -78,7 +78,24 @@ enum class DiagnosticCode : std::uint32_t
     default_scene_selected,
     implicit_scene_created,
     bounds_recomputed,
-    internal_invariant
+    internal_invariant,
+    // Campaign H compatibility/conversion/cache diagnostics (appended; existing values unchanged).
+    unsupported_source_format,
+    compatibility_importer_unavailable,
+    material_approximated,
+    axis_converted,
+    unit_converted,
+    tangents_generated,
+    normals_generated,
+    texture_resolved_by_search,
+    ambiguous_dependency,
+    external_converter_failed,
+    external_converter_warning,
+    cache_hit,
+    cache_corrupt,
+    cache_stale,
+    feature_discarded,
+    malformed_source
 };
 
 struct Diagnostic

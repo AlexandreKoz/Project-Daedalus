@@ -12,6 +12,7 @@
 #endif
 #include <Windows.h>
 
+#include "core/RenderSettings.h"
 #include "rendering/OrbitCamera.h"
 
 #include <cstdint>
@@ -21,6 +22,16 @@
 
 namespace daedalus
 {
+// Interactive renderer commands (Campaign D-F): 1/2/3 select raster/hybrid/pathtrace, N toggles
+// the denoiser, +/- adjust exposure by 0.5 EV, H requests an explicit history/accumulation reset.
+struct RendererKeyCommands
+{
+    std::optional<RendererMode> mode;
+    bool toggle_denoiser = false;
+    float exposure_delta = 0.0F;
+    bool reset_history = false;
+};
+
 class Win32Window final
 {
 public:
@@ -39,6 +50,7 @@ public:
     [[nodiscard]] std::optional<std::pair<std::uint32_t, std::uint32_t>> consume_resize();
     [[nodiscard]] OrbitInput consume_orbit_input() noexcept;
     [[nodiscard]] bool consume_reload_request() noexcept;
+    [[nodiscard]] RendererKeyCommands consume_renderer_commands() noexcept;
     [[nodiscard]] bool minimized() const noexcept;
     [[nodiscard]] bool close_requested() const noexcept;
     [[nodiscard]] HWND native_handle() const noexcept;
@@ -64,6 +76,7 @@ private:
     POINT last_mouse_{};
     OrbitInput orbit_input_{};
     bool reload_requested_ = false;
+    RendererKeyCommands renderer_commands_{};
     bool stress_sequence_active_ = false;
     std::uint32_t stress_sequence_stage_ = 0;
 };

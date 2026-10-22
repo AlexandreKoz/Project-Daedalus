@@ -85,6 +85,7 @@ FrameRecordingContext D3D12Context::begin_frame()
 
     return FrameRecordingContext{
         .command_list = command_list_.Get(),
+        .command_list4 = command_list4_.Get(),
         .back_buffer = frame.back_buffer.Get(),
         .render_target = rtv_handle(current_frame_index_),
         .frame_index = current_frame_index_,
@@ -221,6 +222,7 @@ void D3D12Context::shutdown(bool report_device_live_objects) noexcept
         return;
     }
 
+    command_list4_.Reset();
     command_list_.Reset();
     for (FrameResource& frame : frames_)
     {
@@ -260,6 +262,7 @@ void D3D12Context::shutdown(bool report_device_live_objects) noexcept
     static_cast<void>(report_device_live_objects);
 #endif
 
+    device5_.Reset();
     device_.Reset();
     adapter_.Reset();
     factory_.Reset();
@@ -268,6 +271,26 @@ void D3D12Context::shutdown(bool report_device_live_objects) noexcept
 ID3D12Device* D3D12Context::device() const noexcept
 {
     return device_.Get();
+}
+
+ID3D12Device5* D3D12Context::device5() const noexcept
+{
+    return device5_.Get();
+}
+
+ID3D12CommandQueue* D3D12Context::command_queue() const noexcept
+{
+    return command_queue_.Get();
+}
+
+bool D3D12Context::supports_command_list4() const noexcept
+{
+    return command_list4_ != nullptr;
+}
+
+IDXGIAdapter1* D3D12Context::adapter() const noexcept
+{
+    return adapter_.Get();
 }
 
 std::uint32_t D3D12Context::width() const noexcept
@@ -508,6 +531,9 @@ void D3D12Context::create_command_objects()
         nullptr,
         IID_PPV_ARGS(&command_list_)));
     DAEDALUS_THROW_IF_FAILED(command_list_->Close());
+    // Optional DXR interfaces. Their absence is a capability result, not an error: raster remains available.
+    if (FAILED(command_list_.As(&command_list4_))) command_list4_.Reset();
+    if (FAILED(device_.As(&device5_))) device5_.Reset();
 
     DAEDALUS_THROW_IF_FAILED(device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_)));
     UniqueWin32Handle event(CreateEventW(nullptr, FALSE, FALSE, nullptr));
@@ -678,6 +704,8 @@ bool D3D12Context::try_wait_for_gpu() noexcept
 void D3D12Context::abandon_resources() noexcept
 {
     // Member destructors must not release these objects after an unsuccessful final queue flush.
+    static_cast<void>(command_list4_.Detach());
+    static_cast<void>(device5_.Detach());
     static_cast<void>(command_list_.Detach());
     for (FrameResource& frame : frames_)
     {

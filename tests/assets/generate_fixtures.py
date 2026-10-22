@@ -785,6 +785,79 @@ material_out_of_range = {"asset": {"version": "2.0"}, "materials": [{"pbrMetalli
 quantization_not_required = {"asset": {"version": "2.0"}, "extensionsUsed": ["KHR_mesh_quantization"]}
 (INVALID / "quantization_not_required.gltf").write_text(json.dumps(quantization_not_required), encoding="utf-8")
 
+# ---- Campaign H compatibility fixtures (OBJ/MTL + glTF equivalent) ---------------------------------
+# Kept outside valid/invalid: they are consumed by DaedalusAssetPipelineTests (OBJ requires the
+# optional Assimp build) rather than by the glTF-only fixture manifest. The OBJ/MTL text is also
+# committed verbatim; the PNG and the glTF equivalent exist only after this generator runs.
+COMPAT = ROOT / "compat"
+if COMPAT.exists():
+    shutil.rmtree(COMPAT)
+(COMPAT / "textures").mkdir(parents=True)
+COMPAT_QUAD_OBJ = (
+    "# Daedalus Campaign H compatibility fixture (CC0). Unit quad in the XY plane facing +Z.\n"
+    "mtllib quad.mtl\n"
+    "o Quad\n"
+    "v -1.0 -1.0 0.0\n"
+    "v 1.0 -1.0 0.0\n"
+    "v 1.0 1.0 0.0\n"
+    "v -1.0 1.0 0.0\n"
+    "vt 0.0 0.0\n"
+    "vt 1.0 0.0\n"
+    "vt 1.0 1.0\n"
+    "vt 0.0 1.0\n"
+    "vn 0.0 0.0 1.0\n"
+    "usemtl checker\n"
+    "f 1/1/1 2/2/1 3/3/1\n"
+    "f 1/1/1 3/3/1 4/4/1\n"
+)
+# Windows-authored, mixed-case texture reference: resolves case-insensitively to textures/checker.png.
+COMPAT_QUAD_MTL = (
+    "# Daedalus Campaign H compatibility fixture (CC0).\n"
+    "newmtl checker\n"
+    "Kd 1.0 1.0 1.0\n"
+    "Ns 96.0\n"
+    "d 1.0\n"
+    "map_Kd Textures\\Checker.PNG\n"
+)
+(COMPAT / "quad.obj").write_bytes(COMPAT_QUAD_OBJ.encode("ascii"))
+(COMPAT / "quad.mtl").write_bytes(COMPAT_QUAD_MTL.encode("ascii"))
+compat_checker = png_rgba(2, 2, bytes([255, 255, 255, 255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 255]))
+(COMPAT / "textures" / "checker.png").write_bytes(compat_checker)
+# glTF equivalent of quad.obj: identical positions/normals/indices; UVs in glTF's top-left origin
+# (v' = 1 - v), which is exactly the conversion the compatibility importer must apply.
+compat_positions = [(-1.0, -1.0, 0.0), (1.0, -1.0, 0.0), (1.0, 1.0, 0.0), (-1.0, 1.0, 0.0)]
+compat_normals = [(0.0, 0.0, 1.0)] * 4
+compat_uvs = [(0.0, 1.0), (1.0, 1.0), (1.0, 0.0), (0.0, 0.0)]
+compat_indices = [0, 1, 2, 0, 2, 3]
+compat_bin = b"".join(struct.pack("<3f", *p) for p in compat_positions)
+compat_bin += b"".join(struct.pack("<3f", *n) for n in compat_normals)
+compat_bin += b"".join(struct.pack("<2f", *t) for t in compat_uvs)
+compat_bin += struct.pack("<6H", *compat_indices)
+compat_doc = {
+    "asset": {"version": "2.0", "generator": "Daedalus Campaign H fixture generator"},
+    "buffers": [{"byteLength": len(compat_bin), "uri": data_uri(compat_bin)}],
+    "bufferViews": [
+        {"buffer": 0, "byteOffset": 0, "byteLength": 48},
+        {"buffer": 0, "byteOffset": 48, "byteLength": 48},
+        {"buffer": 0, "byteOffset": 96, "byteLength": 32},
+        {"buffer": 0, "byteOffset": 128, "byteLength": 12},
+    ],
+    "accessors": [
+        {"bufferView": 0, "componentType": 5126, "count": 4, "type": "VEC3", "min": [-1.0, -1.0, 0.0], "max": [1.0, 1.0, 0.0]},
+        {"bufferView": 1, "componentType": 5126, "count": 4, "type": "VEC3"},
+        {"bufferView": 2, "componentType": 5126, "count": 4, "type": "VEC2"},
+        {"bufferView": 3, "componentType": 5123, "count": 6, "type": "SCALAR"},
+    ],
+    "images": [{"uri": "textures/checker.png"}],
+    "textures": [{"source": 0}],
+    "materials": [{"name": "checker", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}, "metallicFactor": 0.0}}],
+    "meshes": [{"name": "Quad", "primitives": [{"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": 3, "material": 0}]}],
+    "nodes": [{"name": "Quad", "mesh": 0}],
+    "scenes": [{"nodes": [0]}],
+    "scene": 0,
+}
+(COMPAT / "quad_equivalent.gltf").write_text(json.dumps(compat_doc, indent=2), encoding="utf-8")
+
 manifest = {
     "license": "CC0-1.0; all fixtures are generated and self-authored",
     "valid": [
@@ -809,4 +882,4 @@ manifest = {
     ],
 }
 (ROOT / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-print("Generated Campaign B + Campaign C1/C2 fixtures")
+print("Generated Campaign B + Campaign C1/C2 + Campaign H compatibility fixtures")
