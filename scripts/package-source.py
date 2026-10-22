@@ -26,9 +26,19 @@ FORBIDDEN_FILES = (
 )
 
 
+# Exact-directory exceptions: self-authored Wavefront OBJ text fixtures share the *.obj extension
+# with MSVC object files. Only plain files directly inside these directories are exempt.
+SOURCE_FIXTURE_EXCEPTIONS = (
+    (PurePosixPath("tests/assets/compat"), "*.obj"),
+)
+
+
 def forbidden(relative: PurePosixPath) -> bool:
     if any(part in FORBIDDEN_DIRECTORIES or part.startswith("build-") for part in relative.parts):
         return True
+    if any(relative.parent == directory and fnmatch.fnmatchcase(relative.name, pattern)
+           for directory, pattern in SOURCE_FIXTURE_EXCEPTIONS):
+        return False
     return any(fnmatch.fnmatchcase(relative.name, pattern) for pattern in FORBIDDEN_FILES)
 
 

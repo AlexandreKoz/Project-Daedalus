@@ -36,6 +36,12 @@ $ForbiddenFilePatterns = @(
     "*.pfx", "*.p12", "*.secret", "id_rsa", "id_ed25519", "credentials.json", "secrets.json"
 )
 
+# Exact-directory exceptions: self-authored Wavefront OBJ text fixtures share the *.obj extension
+# with MSVC object files. Only plain files directly inside these directories are exempt.
+$SourceFixtureExceptions = @(
+    @{ Directory = "tests/assets/compat"; Pattern = "*.obj" }
+)
+
 function Test-ForbiddenRelativePath([string]$RelativePath, [bool]$IsDirectory) {
     $Parts = $RelativePath.Replace('\', '/').Split('/', [System.StringSplitOptions]::RemoveEmptyEntries)
     foreach ($Part in $Parts) {
@@ -43,6 +49,10 @@ function Test-ForbiddenRelativePath([string]$RelativePath, [bool]$IsDirectory) {
     }
     if (-not $IsDirectory) {
         $Leaf = $Parts[-1]
+        $Parent = if ($Parts.Count -gt 1) { [string]::Join('/', $Parts[0..($Parts.Count - 2)]) } else { "" }
+        foreach ($Exception in $SourceFixtureExceptions) {
+            if ($Parent -ceq $Exception.Directory -and $Leaf -like $Exception.Pattern) { return $false }
+        }
         foreach ($Pattern in $ForbiddenFilePatterns) {
             if ($Leaf -like $Pattern) { return $true }
         }
